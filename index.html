@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HGW Wellness · Panel de bienestar</title>
+<meta name="description" content="Plataforma privada de orientación de bienestar y seguimiento de clientes HGW Wellness.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%231B2E28'/%3E%3Cpath d='M50 20 C 30 40, 30 65, 50 82 C 70 65, 70 40, 50 20 Z' fill='none' stroke='%23D6A24C' stroke-width='6'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Chart.js: usado para las gráficas de evolución de peso y hábitos (módulo de perfil y seguimientos) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<!-- jsPDF: usado para generar el PDF descargable del plan semanal -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Lucide: iconografía SVG ligera para toda la interfaz -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lucide-static/0.462.0/umd/lucide.min.js"></script>
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============================================================
+     PUERTA DE ACCESO (NUEVO)
+     Punto de entrada que separa las dos modalidades de acceso.
+     No es una capa de seguridad: es solo una bifurcación de
+     experiencia de usuario. La separación real de datos sigue
+     dependiendo de qué vista se muestra, ya que todo corre en
+     el mismo navegador sin backend.
+============================================================= -->
+<div id="access-gate" class="login-screen">
+  <div class="login-aurora" aria-hidden="true"></div>
+  <div class="login-card gate-card">
+    <div class="login-brand">
+      <span class="login-ring" aria-hidden="true"></span>
+      <div>
+        <p class="login-eyebrow">Bienvenido</p>
+        <h1 class="login-title">HGW Wellness</h1>
+      </div>
+    </div>
+    <p class="login-sub">Elige cómo quieres ingresar.</p>
+
+    <div class="gate-choices">
+      <button type="button" class="gate-choice" id="gate-btn-privado">
+        <span class="gate-choice-icon"><span data-lucide="lock"></span></span>
+        <span class="gate-choice-text">
+          <strong>Acceso del emprendedor</strong>
+          <span>Panel privado de gestión</span>
+        </span>
+        <span data-lucide="chevron-right"></span>
+      </button>
+      <button type="button" class="gate-choice" id="gate-btn-publico">
+        <span class="gate-choice-icon"><span data-lucide="sparkles"></span></span>
+        <span class="gate-choice-text">
+          <strong>Soy cliente / quiero una asesoría</strong>
+          <span>Consulta productos y solicita tu asesoría gratuita</span>
+        </span>
+        <span data-lucide="chevron-right"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     PANTALLA DE ACCESO (DEMO) — SIN CAMBIOS FUNCIONALES
+     Nota técnica: este acceso es únicamente demostrativo para la
+     primera versión frontend. En producción debe sustituirse por
+     autenticación real (backend seguro, hashing de contraseñas,
+     tokens de sesión, HTTPS, etc.)
+     Ahora se muestra solo después de elegir "Acceso del
+     emprendedor" en la puerta de acceso; oculta por defecto.
+============================================================= -->
+<div id="login-screen" class="login-screen hidden">
+  <div class="login-aurora" aria-hidden="true"></div>
+  <div class="login-card">
+    <button type="button" class="back-link" id="login-back-btn"><span data-lucide="arrow-left"></span> Volver</button>
+    <div class="login-brand">
+      <span class="login-ring" aria-hidden="true"></span>
+      <div>
+        <p class="login-eyebrow">Acceso privado</p>
+        <h1 class="login-title">HGW Wellness</h1>
+      </div>
+    </div>
+    <p class="login-sub">Panel de orientación de bienestar y seguimiento de clientes.</p>
+
+    <form id="login-form" class="login-form" novalidate>
+      <div class="field">
+        <label for="login-user">Usuario</label>
+        <input type="text" id="login-user" name="usuario" placeholder="emprendedor@hgw" autocomplete="username" value="emprendedor@hgw">
+      </div>
+      <div class="field">
+        <label for="login-pass">Contraseña</label>
+        <input type="password" id="login-pass" name="password" placeholder="••••••••" autocomplete="current-password" value="demo1234">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">
+        <span data-lucide="log-in"></span> Ingresar al panel
+      </button>
+      <p class="login-hint">Acceso de demostración · usuario y contraseña ya están precargados.</p>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================
+     APLICACIÓN
+============================================================= -->
+<div id="app" class="app hidden">
+
+  <!-- Overlay móvil -->
+  <div class="mobile-overlay" id="mobile-overlay"></div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-ring" aria-hidden="true"></span>
+      <div class="brand-text">
+        <strong>HGW</strong>
+        <span>Wellness</span>
+      </div>
+      <button class="sidebar-close" id="sidebar-close" aria-label="Cerrar menú"><span data-lucide="x"></span></button>
+    </div>
+
+    <nav class="sidebar-nav" aria-label="Navegación principal">
+      <button class="nav-item is-active" data-view="dashboard">
+        <span data-lucide="layout-dashboard"></span> Panel principal
+      </button>
+      <button class="nav-item" data-view="clientes">
+        <span data-lucide="users"></span> Clientes
+      </button>
+      <button class="nav-item" data-view="formulario">
+        <span data-lucide="clipboard-list"></span> Formulario de bienestar
+      </button>
+      <button class="nav-item" data-view="plan">
+        <span data-lucide="calendar-days"></span> Plan semanal
+      </button>
+      <button class="nav-item" data-view="seguimientos">
+        <span data-lucide="activity"></span> Seguimientos
+      </button>
+      <button class="nav-item" data-view="productos">
+        <span data-lucide="package"></span> Productos HGW
+      </button>
+      <button class="nav-item" data-view="estadisticas">
+        <span data-lucide="bar-chart-3"></span> Estadísticas
+      </button>
+      <button class="nav-item" data-view="solicitudes">
+        <span data-lucide="ticket"></span> Solicitudes de asesoría
+      </button>
+      <button class="nav-item" data-view="deportivo">
+        <span data-lucide="dumbbell"></span> Plan deportivo
+      </button>
+      <button class="nav-item" data-view="spa">
+        <span data-lucide="flower-2"></span> Reservas SPA
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="nav-item nav-item-muted" id="btn-reset-data">
+        <span data-lucide="rotate-ccw"></span> Reiniciar datos demo
+      </button>
+      <button class="nav-item nav-item-muted" id="btn-logout">
+        <span data-lucide="log-out"></span> Cerrar sesión
+      </button>
+    </div>
+  </aside>
+
+  <!-- CONTENIDO -->
+  <div class="app-content">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="btn-open-sidebar" aria-label="Abrir menú"><span data-lucide="menu"></span></button>
+      <div class="topbar-title">
+        <h1 id="topbar-heading">Panel principal</h1>
+        <p id="topbar-sub">Vista general de tu actividad</p>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-primary btn-sm" data-action="nuevo-cliente">
+          <span data-lucide="user-plus"></span><span class="btn-label">Nuevo cliente</span>
+        </button>
+        <div class="avatar" title="Emprendedor HGW">EH</div>
+      </div>
+    </header>
+
+    <main class="views" id="views">
+
+      <!-- ============ DASHBOARD ============ -->
+      <section class="view is-active" id="view-dashboard">
+        <div class="greeting-card">
+          <div>
+            <p class="greeting-eyebrow" id="greeting-text">Buenos días</p>
+            <h2 id="greeting-name">Hola, Emprendedor HGW</h2>
+            <p class="greeting-date" id="greeting-date">—</p>
+          </div>
+          <span class="greeting-ring" aria-hidden="true"></span>
+        </div>
+
+        <div class="stats-grid" id="stats-grid">
+          <!-- generado por JS -->
+        </div>
+
+        <div class="dash-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Próximos seguimientos</h3>
+              <button class="link-btn" data-view-link="clientes">Ver todos los clientes</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="tabla-proximos">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Objetivo</th>
+                    <th>Última visita</th>
+                    <th>Próximo seguimiento</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla-proximos-body"></tbody>
+              </table>
+            </div>
+            <div class="empty-state hidden" id="proximos-empty">
+              <span data-lucide="calendar-check"></span>
+              <p>No hay seguimientos programados todavía.</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Acciones rápidas</h3></div>
+            <div class="quick-actions">
+              <button class="quick-action" data-action="nuevo-cliente">
+                <span data-lucide="user-plus"></span>
+                <span>Nuevo cliente</span>
+              </button>
+              <button class="quick-action" data-action="nuevo-seguimiento">
+                <span data-lucide="activity"></span>
+                <span>Nuevo seguimiento</span>
+              </button>
+              <button class="quick-action" data-action="generar-plan">
+                <span data-lucide="calendar-days"></span>
+                <span>Generar plan</span>
+              </button>
+              <button class="quick-action" data-view-link="clientes">
+                <span data-lucide="users"></span>
+                <span>Ver clientes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ CLIENTES ============ -->
+      <section class="view" id="view-clientes">
+        <div class="toolbar">
+          <div class="search-box">
+            <span data-lucide="search"></span>
+            <input type="search" id="buscar-cliente" placeholder="Buscar cliente por nombre, correo o teléfono…">
+          </div>
+          <select id="filtro-objetivo" class="select-filter">
+            <option value="">Todos los objetivos</option>
+          </select>
+          <select id="filtro-estado" class="select-filter">
+            <option value="">Todos los estados</option>
+            <option value="activo">Activo</option>
+            <option value="pendiente">Seguimiento pendiente</option>
+            <option value="inactivo">Inactivo</option>
+          </select>
+          <button class="btn btn-primary" data-action="nuevo-cliente">
+            <span data-lucide="user-plus"></span> Nuevo cliente
+          </button>
+        </div>
+
+        <div class="clients-grid" id="clients-grid"></div>
+        <div class="empty-state hidden" id="clientes-empty">
+          <span data-lucide="users"></span>
+          <p>Aún no tienes clientes que coincidan con la búsqueda.</p>
+          <button class="btn btn-primary" data-action="nuevo-cliente">Registrar el primer cliente</button>
+        </div>
+      </section>
+
+      <!-- ============ PERFIL DE CLIENTE ============ -->
+      <section class="view" id="view-perfil">
+        <button class="back-link" data-view-link="clientes"><span data-lucide="arrow-left"></span> Volver a clientes</button>
+
+        <div class="profile-head" id="perfil-head"></div>
+
+        <div class="profile-tabs">
+          <button class="tab-btn is-active" data-tab="info">Información</button>
+          <button class="tab-btn" data-tab="evolucion">Evolución</button>
+          <button class="tab-btn" data-tab="productos">Productos asociados</button>
+          <button class="tab-btn" data-tab="historial">Historial de seguimientos</button>
+        </div>
+
+        <div class="tab-panel is-active" id="tab-info"></div>
+
+        <div class="tab-panel" id="tab-evolucion">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Evolución registrada</h3>
+              <span class="badge badge-muted">Historial de indicadores, no un diagnóstico</span>
+            </div>
+            <div class="chart-box"><canvas id="chart-evolucion"></canvas></div>
+            <p class="disclaimer-note"><span data-lucide="info"></span> Esta gráfica refleja únicamente los valores registrados por el emprendedor y no constituye una valoración médica.</p>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-productos">
+          <div class="panel">
+            <div class="panel-head"><h3>Productos HGW sugeridos según el objetivo</h3></div>
+            <div class="products-mini-grid" id="perfil-productos"></div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="tab-historial">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Historial de seguimientos</h3>
+              <button class="btn btn-secondary btn-sm" data-action="nuevo-seguimiento"><span data-lucide="plus"></span> Registrar seguimiento</button>
+            </div>
+            <div class="timeline" id="perfil-timeline"></div>
+            <div class="empty-state hidden" id="timeline-empty">
+              <span data-lucide="activity"></span>
+              <p>Todavía no hay seguimientos registrados para este cliente.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ FORMULARIO DE BIENESTAR (WIZARD) ============ -->
+      <section class="view" id="view-formulario">
+        <div class="panel wizard-panel">
+          <div class="wizard-progress">
+            <div class="wizard-progress-bar" id="wizard-progress-bar"></div>
+          </div>
+          <div class="wizard-steps-labels" id="wizard-steps-labels"></div>
+
+          <form id="wizard-form" novalidate>
+            <!-- Paso 1 -->
+            <div class="wizard-step is-active" data-step="1">
+              <h3>Información básica</h3>
+              <p class="step-sub">Datos generales de contacto del cliente.</p>
+              <div class="form-grid">
+                <div class="field"><label for="w-nombre">Nombre completo *</label><input type="text" id="w-nombre" required></div>
+                <div class="field"><label for="w-telefono">Teléfono *</label><input type="tel" id="w-telefono" required></div>
+                <div class="field"><label for="w-correo">Correo electrónico</label><input type="email" id="w-correo"></div>
+                <div class="field"><label for="w-edad">Edad</label><input type="number" id="w-edad" min="0" max="120"></div>
+              </div>
+            </div>
+
+            <!-- Paso 2 -->
+            <div class="wizard-step" data-step="2">
+              <h3>Datos corporales</h3>
+              <p class="step-sub">Registro base de peso y talla. Uso exclusivamente informativo.</p>
+              <div class="form-grid">
+                <div class="field"><label for="w-peso">Peso (kg) *</label><input type="number" step="0.1" id="w-peso" required></div>
+                <div class="field"><label for="w-talla">Talla (cm) *</label><input type="number" step="0.1" id="w-talla" required></div>
+                <div class="field">
+                  <label for="w-sexo">Sexo</label>
+                  <select id="w-sexo">
+                    <option value="">Prefiere no decir</option>
+                    <option value="femenino">Femenino</option>
+                    <option value="masculino">Masculino</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Paso 3 -->
+            <div class="wizard-step" data-step="3">
+              <h3>Hábitos</h3>
+              <p class="step-sub">Hábitos generales actuales del cliente.</p>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="w-actividad">Nivel de actividad</label>
+                  <select id="w-actividad">
+                    <option value="sedentario">Sedentario</option>
+                    <option value="ligero">Ligero</option>
+                    <option value="moderado">Moderado</option>
+                    <option value="activo">Activo</option>
+                  </select>
+                </div>
+                <div class="field"><label for="w-agua">Consumo de agua (vasos/día)</label><input type="number" id="w-agua" min="0" max="20"></div>
+                <div class="field">
+                  <label for="w-experiencia">Experiencia con actividad física</label>
+                  <select id="w-experiencia">
+                    <option value="ninguna">Ninguna / está empezando</option>
+                    <option value="principiante">Principiante</option>
+                    <option value="intermedio">Intermedio</option>
+                    <option value="avanzado">Avanzado</option>
+                  </select>
+                </div>
+                <div class="field field-wide"><label for="w-habitos">Hábitos generales</label><textarea id="w-habitos" rows="3" placeholder="Ej. rutina de sueño, comidas fuera de casa, snacks frecuentes…"></textarea></div>
+              </div>
+            </div>
+
+            <!-- Paso 4 -->
+            <div class="wizard-step" data-step="4">
+              <h3>Objetivos de bienestar</h3>
+              <p class="step-sub">Selecciona la categoría general de orientación.</p>
+              <div class="objetivo-grid" id="w-objetivo-grid"></div>
+              <input type="hidden" id="w-objetivo" required>
+            </div>
+
+            <!-- Paso 5 -->
+            <div class="wizard-step" data-step="5">
+              <h3>Preferencias</h3>
+              <p class="step-sub">Notas y preferencias adicionales para personalizar la orientación.</p>
+              <div class="form-grid">
+                <div class="field field-wide"><label for="w-observaciones">Observaciones</label><textarea id="w-observaciones" rows="3" placeholder="Preferencias alimentarias, restricciones, horarios, etc."></textarea></div>
+                <div class="field"><label for="w-seguimiento">Próxima fecha de seguimiento</label><input type="date" id="w-seguimiento"></div>
+                <div class="field field-wide"><label for="w-preferencias">Preferencias alimentarias</label><input type="text" id="w-preferencias" placeholder="Ej. vegetariana, comida casera, poco condimentada…"></div>
+                <div class="field field-wide"><label for="w-restricciones">Restricciones alimentarias</label><input type="text" id="w-restricciones" placeholder="Ej. intolerancia a la lactosa, sin gluten…"></div>
+                <div class="field field-wide"><label for="w-evitar">Alimentos que desea evitar</label><input type="text" id="w-evitar" placeholder="Ej. mariscos, picante, embutidos…"></div>
+              </div>
+            </div>
+
+            <!-- Paso 6 -->
+            <div class="wizard-step" data-step="6">
+              <h3>Generación de orientación</h3>
+              <p class="step-sub">Revisa el resumen antes de finalizar.</p>
+              <div class="wizard-summary" id="wizard-summary"></div>
+              <p class="disclaimer-note"><span data-lucide="info"></span> Esta orientación es de carácter general y educativo. No constituye diagnóstico, tratamiento ni prescripción médica.</p>
+            </div>
+          </form>
+
+          <div class="wizard-nav">
+            <button class="btn btn-ghost" id="wizard-cancel">Cancelar</button>
+            <div class="wizard-nav-right">
+              <button class="btn btn-secondary" id="wizard-back">Atrás</button>
+              <button class="btn btn-primary" id="wizard-next">Continuar</button>
+              <button class="btn btn-primary hidden" id="wizard-finish"><span data-lucide="check"></span> Finalizar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PLAN SEMANAL ============ -->
+      <section class="view" id="view-plan">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Generar plan semanal</h3>
+          </div>
+          <div class="plan-setup">
+            <div class="field">
+              <label for="plan-cliente">Cliente</label>
+              <select id="plan-cliente"></select>
+            </div>
+            <button class="btn btn-primary" id="btn-generar-plan"><span data-lucide="sparkles"></span> Generar plan semanal</button>
+          </div>
+        </div>
+
+        <div class="panel hidden" id="plan-resultado-panel">
+          <div class="panel-head">
+            <h3>Plan semanal — <span id="plan-cliente-nombre"></span></h3>
+            <div class="panel-head-actions">
+              <span class="badge badge-muted">Orientación general, editable</span>
+              <button class="btn btn-secondary btn-sm" id="btn-descargar-pdf"><span data-lucide="download"></span> Descargar PDF</button>
+            </div>
+          </div>
+
+          <div class="panel-sub panel-sub-flush">
+            <h4>Por qué se adapta a este cliente</h4>
+            <div class="wizard-summary" id="plan-justificacion"></div>
+          </div>
+
+          <div class="plan-grid" id="plan-grid"></div>
+
+          <div class="panel-sub">
+            <h4>Productos HGW asociados al objetivo</h4>
+            <div class="products-mini-grid" id="plan-productos"></div>
+          </div>
+
+          <p class="disclaimer-note"><span data-lucide="info"></span> Esta información tiene carácter general y educativo. No constituye diagnóstico, tratamiento ni prescripción médica y no sustituye la orientación de un profesional de la salud.</p>
+        </div>
+      </section>
+
+      <!-- ============ PLAN DEPORTIVO (NUEVO) ============ -->
+      <section class="view" id="view-deportivo">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Generar plan deportivo</h3>
+          </div>
+          <div class="plan-setup">
+            <div class="field">
+              <label for="deportivo-cliente">Cliente</label>
+              <select id="deportivo-cliente"></select>
+            </div>
+            <button class="btn btn-primary" id="btn-generar-deportivo"><span data-lucide="dumbbell"></span> Generar plan deportivo</button>
+          </div>
+        </div>
+
+        <div class="panel hidden" id="deportivo-resultado-panel">
+          <div class="panel-head">
+            <h3>Plan deportivo — <span id="deportivo-cliente-nombre"></span></h3>
+            <span class="badge badge-muted">Orientación general de actividad física</span>
+          </div>
+
+          <div class="panel-sub panel-sub-flush">
+            <h4>Por qué se adapta a este cliente</h4>
+            <div class="wizard-summary" id="deportivo-justificacion"></div>
+          </div>
+
+          <div class="panel-sub">
+            <h4>Recomendación semanal estructurada</h4>
+            <div class="info-grid" id="deportivo-grid"></div>
+          </div>
+
+          <p class="disclaimer-note"><span data-lucide="info"></span> Esta es una orientación general de actividad física, no un plan de entrenamiento clínico ni deportivo de alto rendimiento. No sustituye la valoración de un médico, nutricionista o profesional del deporte. Si el cliente tiene una condición de salud relevante, debe consultarlo antes de iniciar cualquier rutina.</p>
+        </div>
+      </section>
+
+      <!-- ============ SEGUIMIENTOS ============ -->
+      <section class="view" id="view-seguimientos">
+        <div class="toolbar">
+          <div class="search-box">
+            <span data-lucide="search"></span>
+            <input type="search" id="buscar-seguimiento" placeholder="Buscar por nombre de cliente…">
+          </div>
+          <button class="btn btn-primary" data-action="nuevo-seguimiento"><span data-lucide="plus"></span> Nuevo seguimiento</button>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table" id="tabla-seguimientos">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Cliente</th>
+                  <th>Peso registrado</th>
+                  <th>Cumplimiento</th>
+                  <th>Bienestar percibido</th>
+                  <th>Próximo seguimiento</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tabla-seguimientos-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state hidden" id="seguimientos-empty">
+            <span data-lucide="activity"></span>
+            <p>No hay seguimientos registrados todavía.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PRODUCTOS HGW ============ -->
+      <section class="view" id="view-productos">
+        <div class="toolbar">
+          <div class="search-box">
+            <span data-lucide="search"></span>
+            <input type="search" id="buscar-producto" placeholder="Buscar producto…">
+          </div>
+          <button class="btn btn-primary" id="btn-nuevo-producto"><span data-lucide="plus"></span> Agregar producto</button>
+        </div>
+        <p class="section-note"><span data-lucide="flask-conical"></span> Estructura de datos preparada para completarse con la información oficial y vigente de cada producto HGW. Los datos aquí mostrados son de ejemplo.</p>
+        <div class="products-grid" id="products-grid"></div>
+      </section>
+
+      <!-- ============ ESTADÍSTICAS ============ -->
+      <section class="view" id="view-estadisticas">
+        <div class="stats-grid" id="stats-grid-2"></div>
+        <div class="dash-grid">
+          <div class="panel">
+            <div class="panel-head"><h3>Clientes por objetivo de bienestar</h3></div>
+            <div class="chart-box"><canvas id="chart-objetivos"></canvas></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Seguimientos registrados (últimas semanas)</h3></div>
+            <div class="chart-box"><canvas id="chart-seguimientos"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ SOLICITUDES DE ASESORÍA (NUEVO — provienen del acceso público) ============ -->
+      <section class="view" id="view-solicitudes">
+        <p class="section-note"><span data-lucide="info"></span> Estas solicitudes solo se guardan en este navegador (no hay servidor ni base de datos conectados). Si un cliente llena el formulario desde su propio celular, su código no aparecerá aquí automáticamente: deberá presentarlo en el local.</p>
+        <div class="toolbar">
+          <div class="search-box">
+            <span data-lucide="search"></span>
+            <input type="search" id="buscar-solicitud" placeholder="Buscar por código, nombre o ciudad…">
+          </div>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table" id="tabla-solicitudes">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Nombre</th>
+                  <th>Contacto</th>
+                  <th>Ciudad</th>
+                  <th>Motivo</th>
+                  <th>Fecha</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tabla-solicitudes-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state hidden" id="solicitudes-empty">
+            <span data-lucide="ticket"></span>
+            <p>No hay solicitudes de asesoría registradas todavía en este navegador.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ RESERVAS SPA (NUEVO — provienen del acceso público) ============ -->
+      <section class="view" id="view-spa">
+        <p class="section-note"><span data-lucide="info"></span> Estas reservas solo se guardan en este navegador (no hay servidor ni base de datos conectados). Si un cliente reserva desde su propio celular, su código no aparecerá aquí automáticamente: deberá presentarlo o mencionarlo al contactar.</p>
+        <div class="toolbar">
+          <div class="search-box">
+            <span data-lucide="search"></span>
+            <input type="search" id="buscar-spa" placeholder="Buscar por código, nombre o tipo de sesión…">
+          </div>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="data-table" id="tabla-spa">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Nombre</th>
+                  <th>Contacto</th>
+                  <th>Tipo de sesión</th>
+                  <th>Fecha</th>
+                  <th>Hora</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-spa-body"></tbody>
+            </table>
+          </div>
+          <div class="empty-state hidden" id="spa-empty">
+            <span data-lucide="flower-2"></span>
+            <p>No hay reservas de SPA registradas todavía en este navegador.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============================================================
+     ACCESO PÚBLICO (NUEVO)
+     Experiencia para visitantes/clientes externos. No solicita
+     usuario ni contraseña y no tiene ninguna vía de acceso al
+     panel privado, a los datos de otros clientes ni a las
+     herramientas internas del emprendedor.
+============================================================= -->
+<div id="public-app" class="app hidden">
+  <div class="app-content">
+    <header class="topbar">
+      <button type="button" class="icon-btn public-back-btn" id="public-back-btn" aria-label="Volver"><span data-lucide="arrow-left"></span></button>
+      <div class="topbar-title">
+        <h1>HGW Wellness</h1>
+        <p>Acceso para clientes y visitantes</p>
+      </div>
+      <div class="topbar-actions">
+        <span class="badge badge-muted">Acceso público</span>
+      </div>
+    </header>
+
+    <main class="views">
+      <div class="profile-tabs">
+        <button type="button" class="tab-btn-pub is-active" data-public-tab="productos">Productos</button>
+        <button type="button" class="tab-btn-pub" data-public-tab="asesoria">Solicitar asesoría</button>
+        <button type="button" class="tab-btn-pub" data-public-tab="spa">SPA</button>
+      </div>
+
+      <section class="tab-panel-pub is-active" id="public-tab-productos">
+        <p class="section-note"><span data-lucide="info"></span> Catálogo informativo. Para más detalles o disponibilidad, solicita tu asesoría gratuita.</p>
+        <div class="products-mini-grid" id="public-products-grid"></div>
+      </section>
+
+      <section class="tab-panel-pub" id="public-tab-asesoria">
+        <div class="panel" id="asesoria-form-panel">
+          <div class="panel-head"><h3>Solicita tu asesoría gratuita</h3></div>
+          <form id="form-asesoria" novalidate>
+            <div class="form-grid">
+              <div class="field"><label for="a-nombre">Nombre completo *</label><input type="text" id="a-nombre" required></div>
+              <div class="field"><label for="a-telefono">Teléfono / WhatsApp *</label><input type="tel" id="a-telefono" required></div>
+              <div class="field"><label for="a-correo">Correo electrónico</label><input type="email" id="a-correo"></div>
+              <div class="field"><label for="a-negocio">Nombre del negocio o local</label><input type="text" id="a-negocio"></div>
+              <div class="field"><label for="a-ciudad">Ciudad *</label><input type="text" id="a-ciudad" required></div>
+              <div class="field">
+                <label for="a-preferencia">Preferencia de contacto</label>
+                <select id="a-preferencia">
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="llamada">Llamada telefónica</option>
+                  <option value="correo">Correo electrónico</option>
+                </select>
+              </div>
+              <div class="field field-wide"><label for="a-motivo">Motivo de la asesoría *</label><textarea id="a-motivo" rows="3" required></textarea></div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-primary" id="btn-enviar-asesoria"><span data-lucide="send"></span> Enviar solicitud</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel hidden" id="asesoria-confirmacion-panel">
+          <div class="empty-state success">
+            <span data-lucide="circle-check"></span>
+            <p class="confirm-title">Solicitud registrada correctamente</p>
+            <p>Tu código de asesoría es:</p>
+            <div class="codigo-box" id="codigo-generado">KAIROS-00000</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-copiar-codigo"><span data-lucide="copy"></span> Copiar código</button>
+            <p class="disclaimer-note confirm-note"><span data-lucide="info"></span> Guarda este código y preséntalo en el local para recibir tu asesoría personalizada.</p>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-nueva-solicitud">Registrar otra solicitud</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ SPA — LOREN (NUEVO) ============ -->
+      <section class="tab-panel-pub" id="public-tab-spa">
+        <div class="greeting-card">
+          <div>
+            <p class="greeting-eyebrow">SPA Loren</p>
+            <h2>Que tu belleza no sea un gasto, sino una prioridad</h2>
+            <p class="greeting-date">Lunes a viernes · 8:00 a. m. – 6:00 p. m. · joyalorena58@gmail.com</p>
+          </div>
+          <span class="greeting-ring" aria-hidden="true"></span>
+        </div>
+
+        <p class="section-note"><span data-lucide="info"></span> Catálogo informativo de servicios. Duración, precios y disponibilidad exacta se confirman al agendar.</p>
+        <div class="products-mini-grid" id="spa-servicios-grid"></div>
+
+        <div class="panel" id="spa-form-panel">
+          <div class="panel-head"><h3>Reserva tu sesión</h3></div>
+          <form id="form-spa" novalidate>
+            <div class="form-grid">
+              <div class="field">
+                <label for="spa-tipo">Tipo de sesión *</label>
+                <select id="spa-tipo" required></select>
+              </div>
+              <div class="field"><label for="spa-fecha">Fecha *</label><input type="date" id="spa-fecha" required></div>
+              <div class="field"><label for="spa-hora">Hora *</label><input type="time" id="spa-hora" min="08:00" max="18:00" required></div>
+              <div class="field"><label for="spa-nombre">Nombre completo *</label><input type="text" id="spa-nombre" required></div>
+              <div class="field"><label for="spa-telefono">Teléfono *</label><input type="tel" id="spa-telefono" required></div>
+              <div class="field"><label for="spa-correo">Correo electrónico</label><input type="email" id="spa-correo"></div>
+              <div class="field field-wide"><label for="spa-observaciones">Observaciones</label><textarea id="spa-observaciones" rows="2" placeholder="Alguna preferencia u observación para tu sesión…"></textarea></div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-primary" id="btn-reservar-spa"><span data-lucide="calendar-plus"></span> Reservar sesión</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel hidden" id="spa-confirmacion-panel">
+          <div class="empty-state success">
+            <span data-lucide="circle-check"></span>
+            <p class="confirm-title">Reserva registrada correctamente</p>
+            <p>Tu código de reserva es:</p>
+            <div class="codigo-box" id="spa-codigo-generado">SPA-KR-00000</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-copiar-codigo-spa"><span data-lucide="copy"></span> Copiar código</button>
+            <a class="btn btn-primary btn-sm" id="btn-contactar-spa" href="#" target="_blank" rel="noopener"><span data-lucide="mail"></span> Contactar por correo</a>
+            <p class="disclaimer-note confirm-note"><span data-lucide="info"></span> Tu reserva se confirma directamente con SPA Loren. Guarda tu código como referencia.</p>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-nueva-reserva-spa">Registrar otra reserva</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- ============================================================
+     MODALES
+============================================================= -->
+<div class="modal-backdrop" id="modal-backdrop"></div>
+
+<!-- Modal cliente -->
+<div class="modal" id="modal-cliente" role="dialog" aria-modal="true" aria-labelledby="modal-cliente-title">
+  <div class="modal-head">
+    <h3 id="modal-cliente-title">Nuevo cliente</h3>
+    <button class="icon-btn" data-close-modal><span data-lucide="x"></span></button>
+  </div>
+  <form id="form-cliente" class="modal-body" novalidate>
+    <input type="hidden" id="cliente-id">
+    <div class="form-grid">
+      <div class="field"><label for="c-nombre">Nombre completo *</label><input type="text" id="c-nombre" required></div>
+      <div class="field"><label for="c-telefono">Teléfono *</label><input type="tel" id="c-telefono" required></div>
+      <div class="field"><label for="c-correo">Correo electrónico</label><input type="email" id="c-correo"></div>
+      <div class="field"><label for="c-edad">Edad</label><input type="number" id="c-edad" min="0" max="120"></div>
+      <div class="field"><label for="c-peso">Peso (kg) *</label><input type="number" step="0.1" id="c-peso" required></div>
+      <div class="field"><label for="c-talla">Talla (cm) *</label><input type="number" step="0.1" id="c-talla" required></div>
+      <div class="field">
+        <label for="c-objetivo">Objetivo de bienestar *</label>
+        <select id="c-objetivo" required></select>
+      </div>
+      <div class="field">
+        <label for="c-actividad">Nivel de actividad</label>
+        <select id="c-actividad">
+          <option value="sedentario">Sedentario</option>
+          <option value="ligero">Ligero</option>
+          <option value="moderado">Moderado</option>
+          <option value="activo">Activo</option>
+        </select>
+      </div>
+      <div class="field"><label for="c-agua">Consumo de agua (vasos/día)</label><input type="number" id="c-agua" min="0" max="20"></div>
+      <div class="field"><label for="c-seguimiento">Próxima fecha de seguimiento</label><input type="date" id="c-seguimiento"></div>
+      <div class="field field-wide"><label for="c-habitos">Hábitos generales</label><textarea id="c-habitos" rows="2"></textarea></div>
+      <div class="field field-wide"><label for="c-observaciones">Observaciones</label><textarea id="c-observaciones" rows="2"></textarea></div>
+      <div class="field">
+        <label for="c-sexo">Sexo</label>
+        <select id="c-sexo">
+          <option value="">Prefiere no decir</option>
+          <option value="femenino">Femenino</option>
+          <option value="masculino">Masculino</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="c-experiencia">Experiencia con actividad física</label>
+        <select id="c-experiencia">
+          <option value="ninguna">Ninguna / está empezando</option>
+          <option value="principiante">Principiante</option>
+          <option value="intermedio">Intermedio</option>
+          <option value="avanzado">Avanzado</option>
+        </select>
+      </div>
+      <div class="field field-wide"><label for="c-preferencias">Preferencias alimentarias</label><input type="text" id="c-preferencias" placeholder="Ej. vegetariana, comida casera, poco condimentada…"></div>
+      <div class="field field-wide"><label for="c-restricciones">Restricciones alimentarias</label><input type="text" id="c-restricciones" placeholder="Ej. intolerancia a la lactosa, sin gluten…"></div>
+      <div class="field field-wide"><label for="c-evitar">Alimentos que desea evitar</label><input type="text" id="c-evitar" placeholder="Ej. mariscos, picante, embutidos…"></div>
+    </div>
+  </form>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close-modal>Cancelar</button>
+    <button class="btn btn-primary" id="btn-guardar-cliente"><span data-lucide="check"></span> Guardar cliente</button>
+  </div>
+</div>
+
+<!-- Modal seguimiento -->
+<div class="modal" id="modal-seguimiento" role="dialog" aria-modal="true" aria-labelledby="modal-seguimiento-title">
+  <div class="modal-head">
+    <h3 id="modal-seguimiento-title">Nuevo seguimiento</h3>
+    <button class="icon-btn" data-close-modal><span data-lucide="x"></span></button>
+  </div>
+  <form id="form-seguimiento" class="modal-body" novalidate>
+    <div class="form-grid">
+      <div class="field field-wide">
+        <label for="s-cliente">Cliente *</label>
+        <select id="s-cliente" required></select>
+      </div>
+      <div class="field"><label for="s-fecha">Fecha *</label><input type="date" id="s-fecha" required></div>
+      <div class="field"><label for="s-peso">Peso registrado (kg)</label><input type="number" step="0.1" id="s-peso"></div>
+      <div class="field">
+        <label for="s-cumplimiento">Cumplimiento del plan</label>
+        <select id="s-cumplimiento">
+          <option value="alto">Alto</option>
+          <option value="medio">Medio</option>
+          <option value="bajo">Bajo</option>
+        </select>
+      </div>
+      <div class="field"><label for="s-hidratacion">Hidratación (vasos/día)</label><input type="number" id="s-hidratacion" min="0" max="20"></div>
+      <div class="field">
+        <label for="s-actividad">Actividad física</label>
+        <select id="s-actividad">
+          <option value="sedentario">Sedentario</option>
+          <option value="ligero">Ligero</option>
+          <option value="moderado">Moderado</option>
+          <option value="activo">Activo</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="s-bienestar">Percepción general de bienestar</label>
+        <select id="s-bienestar">
+          <option value="excelente">Excelente</option>
+          <option value="buena">Buena</option>
+          <option value="regular">Regular</option>
+          <option value="baja">Baja</option>
+        </select>
+      </div>
+      <div class="field"><label for="s-proximo">Próxima fecha de seguimiento</label><input type="date" id="s-proximo"></div>
+      <div class="field field-wide"><label for="s-productos">Productos utilizados</label><input type="text" id="s-productos" placeholder="Ej. HGW Hidratación, HGW Activa…"></div>
+      <div class="field field-wide"><label for="s-observaciones">Observaciones</label><textarea id="s-observaciones" rows="2"></textarea></div>
+    </div>
+  </form>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close-modal>Cancelar</button>
+    <button class="btn btn-primary" id="btn-guardar-seguimiento"><span data-lucide="check"></span> Guardar seguimiento</button>
+  </div>
+</div>
+
+<!-- Modal producto -->
+<div class="modal" id="modal-producto" role="dialog" aria-modal="true" aria-labelledby="modal-producto-title">
+  <div class="modal-head">
+    <h3 id="modal-producto-title">Nuevo producto HGW</h3>
+    <button class="icon-btn" data-close-modal><span data-lucide="x"></span></button>
+  </div>
+  <form id="form-producto" class="modal-body" novalidate>
+    <input type="hidden" id="p-id">
+    <div class="form-grid">
+      <div class="field field-wide"><label for="p-nombre">Nombre *</label><input type="text" id="p-nombre" required></div>
+      <div class="field"><label for="p-categoria">Categoría</label><input type="text" id="p-categoria" placeholder="Ej. Hidratación, Nutrición…"></div>
+      <div class="field"><label for="p-imagen">URL de imagen</label><input type="url" id="p-imagen" placeholder="https://…"></div>
+      <div class="field field-wide"><label for="p-descripcion">Descripción</label><textarea id="p-descripcion" rows="2"></textarea></div>
+      <div class="field field-wide"><label for="p-ingredientes">Ingredientes</label><input type="text" id="p-ingredientes"></div>
+      <div class="field field-wide"><label for="p-modo">Modo de uso</label><input type="text" id="p-modo"></div>
+      <div class="field field-wide"><label for="p-advertencias">Advertencias</label><input type="text" id="p-advertencias"></div>
+      <div class="field field-wide">
+        <label>Objetivos compatibles</label>
+        <div class="checkbox-grid" id="p-objetivos-grid"></div>
+      </div>
+      <div class="field">
+        <label for="p-activo">Estado</label>
+        <select id="p-activo">
+          <option value="true">Activo</option>
+          <option value="false">Inactivo</option>
+        </select>
+      </div>
+    </div>
+  </form>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close-modal>Cancelar</button>
+    <button class="btn btn-primary" id="btn-guardar-producto"><span data-lucide="check"></span> Guardar producto</button>
+  </div>
+</div>
+
+<!-- Modal confirmación -->
+<div class="modal modal-sm" id="modal-confirm" role="alertdialog" aria-modal="true" aria-labelledby="modal-confirm-title">
+  <div class="modal-head">
+    <h3 id="modal-confirm-title">¿Confirmar acción?</h3>
+    <button class="icon-btn" data-close-modal><span data-lucide="x"></span></button>
+  </div>
+  <div class="modal-body">
+    <p id="modal-confirm-text">Esta acción no se puede deshacer.</p>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close-modal>Cancelar</button>
+    <button class="btn btn-danger" id="btn-confirm-action"><span data-lucide="trash-2"></span> Sí, eliminar</button>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
