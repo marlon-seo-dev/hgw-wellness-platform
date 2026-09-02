@@ -297,6 +297,17 @@ async function handleRecursoPrivado(request, env, user, nombreRecurso, id) {
 
   if (request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
+
+    if (nombreRecurso === 'follow-ups') {
+      const cliente = await env.DB.prepare(
+        `SELECT id FROM clients WHERE id = ? AND user_id = ?`
+      ).bind(body.client_id, user.id).first();
+
+      if (!cliente) {
+        return json({ error: 'Cliente no encontrado.' }, 404);
+      }
+    }
+
     const creado = await crearRecurso(env, user, nombreRecurso, body);
     return json(creado, 201);
   }
@@ -456,7 +467,7 @@ export default {
         }
         if (!respuesta) {
           respuesta = await handlePublicoYPrivado(
-            request, env, 'consultation_requests', 'KAIROS',
+            request, env, 'consultation_requests', 'HGW',
             ['nombre', 'telefono', 'correo', 'negocio', 'ciudad', 'motivo', 'preferencia'],
             idParam
           );

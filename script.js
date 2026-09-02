@@ -2219,18 +2219,6 @@ function renderSpaReservas() {
 
 document.getElementById('buscar-spa').addEventListener('input', renderSpaReservas);
 
-/* --- Generación de código único de solicitud ---
-   Se genera en el navegador con Math.random(); es distinto en cada
-   envío. Esto NO equivale a un identificador garantizado único a
-   nivel de un sistema centralizado (eso requeriría backend), pero es
-   suficiente para la experiencia de referencia local solicitada. */
-function generarCodigoSolicitud() {
-  const caracteres = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let sufijo = '';
-  for (let i = 0; i < 5; i++) sufijo += caracteres[Math.floor(Math.random() * caracteres.length)];
-  return `KAIROS-${sufijo}`;
-}
-
 /* --- Validación del formulario de asesoría ---
    Reutiliza clearFieldErrors() y marcarError(), ya usadas en los
    formularios de cliente y wizard, sin modificarlas. */
@@ -2274,15 +2262,13 @@ function validarAsesoriaForm() {
   return valido;
 }
 
-document.getElementById('btn-enviar-asesoria').addEventListener('click', () => {
+document.getElementById('btn-enviar-asesoria').addEventListener('click', async () => {
   if (!validarAsesoriaForm()) {
     showToast('Revisa los campos marcados en el formulario.', 'error');
     return;
   }
 
   const solicitud = {
-    id: uid('sol'),
-    codigo: generarCodigoSolicitud(),
     nombre: document.getElementById('a-nombre').value.trim(),
     telefono: document.getElementById('a-telefono').value.trim(),
     correo: document.getElementById('a-correo').value.trim(),
@@ -2290,9 +2276,27 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', () => {
     ciudad: document.getElementById('a-ciudad').value.trim(),
     motivo: document.getElementById('a-motivo').value.trim(),
     preferencia: document.getElementById('a-preferencia').value,
-    fecha: todayISO(),
-    estado: 'pendiente',
   };
+
+  let respuesta;
+  try {
+    respuesta = await fetch('/api/consultation-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(solicitud),
+    });
+    const datos = await respuesta.json();
+    if (!respuesta.ok || !datos.codigo) {
+      throw new Error(datos.error || 'No se pudo registrar la solicitud.');
+    }
+    solicitud.id = datos.id;
+    solicitud.codigo = datos.codigo;
+    solicitud.fecha = todayISO();
+    solicitud.estado = 'pendiente';
+  } catch (error) {
+    showToast(error.message || 'No se pudo registrar la solicitud.', 'error');
+    return;
+  }
 
   state.solicitudes.push(solicitud);
   persistSolicitudes();

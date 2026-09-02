@@ -14,14 +14,14 @@ compatibility_date = "2026-01-01"
 # por comas si en el futuro hay más de un frontend autorizado.
 [vars]
 ENVIRONMENT = "production"
-ALLOWED_ORIGIN = "https://PENDIENTE-tu-proyecto.pages.dev"
+ALLOWED_ORIGIN = "https://hgw-wellness-platform.pages.dev"
 
 # Base de datos D1. database_id se obtiene al crear la base con
 # `wrangler d1 create hgw_wellness_db` (ver informe, sección de comandos).
 [[d1_databases]]
 binding = "DB"
 database_name = "hgw_wellness_db"
-database_id = "PENDIENTE-completar-tras-crear-la-base"
+database_id = "bbf87363-26ea-4c64-aeea-ae6ba4f67db3"
 
 # ------------------------------------------------------------------------------
 # Entorno de desarrollo local (wrangler dev). Usa la misma base D1 en modo
@@ -34,4 +34,4 @@ vars = { ENVIRONMENT = "development", ALLOWED_ORIGIN = "http://localhost:8788" }
 [[env.development.d1_databases]]
 binding = "DB"
 database_name = "hgw_wellness_db"
-database_id = "PENDIENTE-completar-tras-crear-la-base"
+database_id = "bbf87363-26ea-4c64-aeea-ae6ba4f67db3"

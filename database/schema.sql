@@ -167,7 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_sportsplans_user ON sports_plans(user_id);
 CREATE TABLE IF NOT EXISTS consultation_requests (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  codigo       TEXT NOT NULL UNIQUE,   -- Ej: KAIROS-8F42X
+  codigo       TEXT NOT NULL UNIQUE,   -- Ej: HGW-8F42X
   nombre       TEXT NOT NULL,
   telefono     TEXT NOT NULL,
   correo       TEXT,

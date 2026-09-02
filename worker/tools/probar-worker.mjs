@@ -115,6 +115,44 @@ async function main() {
   r = await call('GET', '/clients', { cookie: cookie2 });
   log('AISLAMIENTO MULTI-TENANT: el segundo usuario NO ve clientes del primero', r.data.length === 0, `Vio: ${r.data.length} clientes`);
 
+  r = await call('POST', '/clients', {
+    cookie: cookie2,
+    body: {
+      nombre: 'Cliente del segundo usuario',
+      telefono: '3009998888',
+      objetivo: 'bienestar-general',
+      peso: 72,
+      talla: 175,
+      historial_peso_json: '[]',
+      demo: 0,
+    },
+  });
+  const clienteUsuario2Id = r.data.id;
+
+  // 6b) Un usuario no puede crear follow-ups para clientes de otro usuario
+  const followUpsAntes = db.prepare(
+    `SELECT COUNT(*) AS total FROM follow_ups`
+  ).get().total;
+
+  r = await call('POST', '/follow-ups', {
+    cookie,
+    body: {
+      client_id: clienteUsuario2Id,
+      fecha: '2026-02-10',
+      peso: 71,
+      demo: 0,
+    },
+  });
+  log('Worker: follow-up con cliente de otro usuario -> 404', r.status === 404);
+
+  const followUpsDespues = db.prepare(
+    `SELECT COUNT(*) AS total FROM follow_ups`
+  ).get().total;
+  log(
+    'Worker: follow-up rechazado no genera ningún INSERT',
+    followUpsDespues === followUpsAntes
+  );
+
   // 7) Plan semanal: crear y luego "regenerar" (debe reemplazar, no duplicar)
   r = await call('POST', '/weekly-plans', { cookie, body: { client_id: clienteId, objetivo: 'bienestar-general', fecha: '2026-01-01', dias_json: '[{"dia":"Lunes"}]' } });
   log('Worker: crear plan semanal -> 201', r.status === 201);
@@ -126,7 +164,7 @@ async function main() {
   // 8) Solicitud de asesoría PÚBLICA (sin cookie) genera código único
   r = await call('POST', '/consultation-requests', { body: { nombre: 'Visitante Público', telefono: '3001112222', ciudad: 'Bogotá', motivo: 'Quiero información' } });
   log('Worker: solicitud pública sin sesión -> 201', r.status === 201, JSON.stringify(r.data));
-  log('Worker: código de solicitud con formato KAIROS-XXXXX', /^KAIROS-[A-Z0-9]{5}$/.test(r.data.codigo || ''), r.data.codigo);
+  log('Worker: código de solicitud con formato HGW-XXXXX', /^HGW-[A-Z0-9]{5}$/.test(r.data.codigo || ''), r.data.codigo);
 
   // 9) Esa solicitud debe verse en el panel privado del emprendedor
   r = await call('GET', '/consultation-requests', { cookie });
