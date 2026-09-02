@@ -19,6 +19,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide-static/0.462.0/umd/lucide.min.js"></script>
 
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
 
@@ -88,16 +89,17 @@
     <form id="login-form" class="login-form" novalidate>
       <div class="field">
         <label for="login-user">Usuario</label>
-        <input type="text" id="login-user" name="usuario" placeholder="emprendedor@hgw" autocomplete="username" value="emprendedor@hgw">
+        <input type="text" id="login-user" name="usuario" placeholder="Tu usuario" autocomplete="username">
       </div>
       <div class="field">
         <label for="login-pass">Contraseña</label>
-        <input type="password" id="login-pass" name="password" placeholder="••••••••" autocomplete="current-password" value="demo1234">
+        <input type="password" id="login-pass" name="password" placeholder="••••••••" autocomplete="current-password">
       </div>
+      <p class="login-error hidden" id="login-error-msg" role="alert"></p>
       <button type="submit" class="btn btn-primary btn-block">
         <span data-lucide="log-in"></span> Ingresar al panel
       </button>
-      <p class="login-hint">Acceso de demostración · usuario y contraseña ya están precargados.</p>
+      <p class="login-hint">Acceso privado exclusivo del emprendedor.</p>
     </form>
   </div>
 </div>
@@ -155,6 +157,9 @@
     </nav>
 
     <div class="sidebar-footer">
+      <button class="nav-item nav-item-muted" id="btn-exportar-respaldo">
+        <span data-lucide="download-cloud"></span> Exportar respaldo (JSON)
+      </button>
       <button class="nav-item nav-item-muted" id="btn-reset-data">
         <span data-lucide="rotate-ccw"></span> Reiniciar datos demo
       </button>

@@ -75,6 +75,7 @@ const LS_KEYS = {
   seguimientos: 'hgw_seguimientos',
   productos: 'hgw_productos',
   planes: 'hgw_planes',
+  planesDeportivos: 'hgw_planes_deportivos',
   solicitudes: 'hgw_solicitudes',
   spaReservas: 'hgw_spa_reservas',
   session: 'hgw_session',
@@ -123,13 +124,8 @@ function addDaysISO(isoDate, days) {
 /* --------------------------------------------------------------------------
    3. DATOS DEMO (seed)
    -------------------------------------------------------------------------- */
-function seedDemoData() {
-  const yaSembrado = Storage.get(LS_KEYS.seeded, false);
-  if (yaSembrado) return;
-
-  const hoy = todayISO();
-
-  const productosDemo = [
+function construirProductosDemo() {
+  return [
     {
       id: uid('prod'), nombre: 'HGW Hidratación Plus', categoria: 'Hidratación',
       descripcion: 'Producto de ejemplo orientado a apoyar hábitos de hidratación diaria.',
@@ -163,9 +159,11 @@ function seedDemoData() {
       objetivosCompatibles: ['organizacion-habitos', 'bienestar-general'], activo: true, demo: true,
     },
   ];
-  Storage.set(LS_KEYS.productos, productosDemo);
+}
 
-  const clientesDemo = [
+function construirClientesDemo() {
+  const hoy = todayISO();
+  return [
     {
       id: uid('cli'), nombre: 'Mariana Restrepo', telefono: '3001234567', correo: 'mariana.r@example.com',
       edad: 34, fechaRegistro: addDaysISO(hoy, -40), peso: 68, talla: 165,
@@ -174,7 +172,7 @@ function seedDemoData() {
       preferencias: 'Comida casera, poco condimentada', restricciones: '', evitar: 'Frituras',
       habitos: 'Come fuera de casa con frecuencia, dificultad para dormir temprano.',
       observaciones: 'Prefiere seguimientos por la tarde.',
-      proximoSeguimiento: addDaysISO(hoy, 2),
+      proximoSeguimiento: addDaysISO(hoy, 2), demo: true,
       historialPeso: [
         { fecha: addDaysISO(hoy, -40), peso: 71 },
         { fecha: addDaysISO(hoy, -25), peso: 69.5 },
@@ -190,7 +188,7 @@ function seedDemoData() {
       preferencias: 'Alta en proteína', restricciones: '', evitar: '',
       habitos: 'Entrena tres veces por semana, buena rutina de sueño.',
       observaciones: '',
-      proximoSeguimiento: addDaysISO(hoy, 6),
+      proximoSeguimiento: addDaysISO(hoy, 6), demo: true,
       historialPeso: [
         { fecha: addDaysISO(hoy, -60), peso: 85 },
         { fecha: addDaysISO(hoy, -30), peso: 83.5 },
@@ -205,7 +203,7 @@ function seedDemoData() {
       preferencias: '', restricciones: 'Intolerancia a la lactosa', evitar: 'Lácteos',
       habitos: 'Trabajo de oficina, olvida tomar agua durante el día.',
       observaciones: 'Interesada en recordatorios.',
-      proximoSeguimiento: addDaysISO(hoy, -1),
+      proximoSeguimiento: addDaysISO(hoy, -1), demo: true,
       historialPeso: [
         { fecha: addDaysISO(hoy, -15), peso: 74.8 },
         { fecha: addDaysISO(hoy, -2), peso: 74 },
@@ -219,59 +217,94 @@ function seedDemoData() {
       preferencias: '', restricciones: '', evitar: 'Comida muy condimentada',
       habitos: 'Horarios de comida irregulares por trabajo.',
       observaciones: 'Sin seguimiento reciente.',
-      proximoSeguimiento: '',
+      proximoSeguimiento: '', demo: true,
       historialPeso: [
         { fecha: addDaysISO(hoy, -90), peso: 93 },
         { fecha: addDaysISO(hoy, -45), peso: 91 },
       ],
     },
   ];
-  Storage.set(LS_KEYS.clientes, clientesDemo);
+}
 
-  const seguimientosDemo = [
+function construirSeguimientosDemo(clientesDemo) {
+  const hoy = todayISO();
+  return [
     {
       id: uid('seg'), clienteId: clientesDemo[0].id, fecha: addDaysISO(hoy, -10),
       peso: 68.5, cumplimiento: 'alto', hidratacion: 5, actividad: 'ligero', bienestar: 'buena',
       productos: 'HGW Balance Nutricional', proximoSeguimiento: addDaysISO(hoy, 2),
-      observaciones: 'Reporta mejor organización de comidas.',
+      observaciones: 'Reporta mejor organización de comidas.', demo: true,
     },
     {
       id: uid('seg'), clienteId: clientesDemo[0].id, fecha: addDaysISO(hoy, -25),
       peso: 69.5, cumplimiento: 'medio', hidratacion: 4, actividad: 'sedentario', bienestar: 'regular',
       productos: '', proximoSeguimiento: addDaysISO(hoy, -10),
-      observaciones: 'Semana con viajes de trabajo.',
+      observaciones: 'Semana con viajes de trabajo.', demo: true,
     },
     {
       id: uid('seg'), clienteId: clientesDemo[1].id, fecha: addDaysISO(hoy, -5),
       peso: 82, cumplimiento: 'alto', hidratacion: 7, actividad: 'activo', bienestar: 'excelente',
       productos: 'HGW Activa', proximoSeguimiento: addDaysISO(hoy, 6),
-      observaciones: 'Buena adherencia a la rutina de entrenamiento.',
+      observaciones: 'Buena adherencia a la rutina de entrenamiento.', demo: true,
     },
     {
       id: uid('seg'), clienteId: clientesDemo[2].id, fecha: addDaysISO(hoy, -2),
       peso: 74, cumplimiento: 'bajo', hidratacion: 3, actividad: 'sedentario', bienestar: 'regular',
       productos: 'HGW Hidratación Plus', proximoSeguimiento: addDaysISO(hoy, -1),
-      observaciones: 'Le cuesta mantener el hábito de hidratación en horario laboral.',
+      observaciones: 'Le cuesta mantener el hábito de hidratación en horario laboral.', demo: true,
     },
   ];
+}
+
+function seedDemoData() {
+  const yaSembrado = Storage.get(LS_KEYS.seeded, false);
+  if (yaSembrado) return;
+
+  const productosDemo = construirProductosDemo();
+  Storage.set(LS_KEYS.productos, productosDemo);
+
+  const clientesDemo = construirClientesDemo();
+  Storage.set(LS_KEYS.clientes, clientesDemo);
+
+  const seguimientosDemo = construirSeguimientosDemo(clientesDemo);
   Storage.set(LS_KEYS.seguimientos, seguimientosDemo);
 
   Storage.set(LS_KEYS.planes, []);
   Storage.set(LS_KEYS.seeded, true);
 }
 
+/* --------------------------------------------------------------------------
+   CORRECCIÓN — "Reiniciar datos demo" (auditoría, prioridad 1)
+   Antes: borraba TODAS las claves de localStorage sin distinguir datos
+   reales de datos de ejemplo (afectaba también productos, clientes,
+   seguimientos, solicitudes y reservas SPA reales).
+   Ahora: elimina ÚNICAMENTE los registros marcados con demo === true
+   (productos, clientes y seguimientos de ejemplo) y los reemplaza por su
+   versión original. Cualquier registro creado por el emprendedor
+   (demo !== true) permanece intacto. Solicitudes de asesoría, reservas
+   SPA, planes semanales y planes deportivos NUNCA tuvieron datos de
+   ejemplo, así que esta función no los toca en absoluto.
+   -------------------------------------------------------------------------- */
 function resetDemoData() {
-  Storage.remove(LS_KEYS.clientes);
-  Storage.remove(LS_KEYS.seguimientos);
-  Storage.remove(LS_KEYS.productos);
-  Storage.remove(LS_KEYS.planes);
-  Storage.remove(LS_KEYS.solicitudes);
-  Storage.remove(LS_KEYS.spaReservas);
-  Storage.remove(LS_KEYS.seeded);
-  seedDemoData();
+  state.productos = state.productos.filter(p => p.demo !== true);
+  state.clientes = state.clientes.filter(c => c.demo !== true);
+  state.seguimientos = state.seguimientos.filter(s => s.demo !== true);
+
+  const productosDemo = construirProductosDemo();
+  const clientesDemo = construirClientesDemo();
+  const seguimientosDemo = construirSeguimientosDemo(clientesDemo);
+
+  state.productos = [...state.productos, ...productosDemo];
+  state.clientes = [...state.clientes, ...clientesDemo];
+  state.seguimientos = [...state.seguimientos, ...seguimientosDemo];
+
+  persistProductos();
+  persistClientes();
+  persistSeguimientos();
+
   loadState();
   renderCurrentView();
-  showToast('Datos demo reiniciados correctamente.', 'success');
+  showToast('Datos de ejemplo restablecidos. Tus clientes, productos, seguimientos, solicitudes y reservas SPA reales no fueron modificados.', 'success');
 }
 
 /* --------------------------------------------------------------------------
@@ -282,6 +315,7 @@ const state = {
   seguimientos: [],
   productos: [],
   planes: [],
+  planesDeportivos: [],
   solicitudes: [],
   spaReservas: [],
   currentView: 'dashboard',
@@ -298,6 +332,7 @@ function loadState() {
   state.seguimientos = Storage.get(LS_KEYS.seguimientos, []);
   state.productos = Storage.get(LS_KEYS.productos, []);
   state.planes = Storage.get(LS_KEYS.planes, []);
+  state.planesDeportivos = Storage.get(LS_KEYS.planesDeportivos, []);
   state.solicitudes = Storage.get(LS_KEYS.solicitudes, []);
   state.spaReservas = Storage.get(LS_KEYS.spaReservas, []);
 }
@@ -306,6 +341,7 @@ function persistClientes() { Storage.set(LS_KEYS.clientes, state.clientes); }
 function persistSeguimientos() { Storage.set(LS_KEYS.seguimientos, state.seguimientos); }
 function persistProductos() { Storage.set(LS_KEYS.productos, state.productos); }
 function persistPlanes() { Storage.set(LS_KEYS.planes, state.planes); }
+function persistPlanesDeportivos() { Storage.set(LS_KEYS.planesDeportivos, state.planesDeportivos); }
 function persistSolicitudes() { Storage.set(LS_KEYS.solicitudes, state.solicitudes); }
 function persistSpaReservas() { Storage.set(LS_KEYS.spaReservas, state.spaReservas); }
 
@@ -662,6 +698,7 @@ function renderPerfil() {
     state.currentView = 'plan';
     goToView('plan');
     document.getElementById('plan-cliente').value = cliente.id;
+    cargarPlanDelClienteSeleccionado();
   });
 
   renderPerfilTabInfo(cliente);
@@ -917,6 +954,7 @@ document.getElementById('btn-guardar-cliente').addEventListener('click', () => {
       id: uid('cli'),
       fechaRegistro: todayISO(),
       historialPeso: [{ fecha: todayISO(), peso }],
+      demo: false,
       ...datos,
     };
     state.clientes.push(nuevo);
@@ -1038,6 +1076,7 @@ document.getElementById('wizard-finish').addEventListener('click', () => {
   const peso = parseFloat(document.getElementById('w-peso').value);
   const nuevoCliente = {
     id: uid('cli'),
+    demo: false,
     nombre: document.getElementById('w-nombre').value.trim(),
     telefono: document.getElementById('w-telefono').value.trim(),
     correo: document.getElementById('w-correo').value.trim(),
@@ -1199,18 +1238,29 @@ function nivelActividadTexto(nivel, idx) {
   return lista[idx % lista.length];
 }
 
-function renderPlanSetup() {
-  const select = document.getElementById('plan-cliente');
-  select.innerHTML = state.clientes.map(c => `<option value="${c.id}">${escapeHTML(c.nombre)}</option>`).join('');
-  document.getElementById('plan-resultado-panel').classList.add('hidden');
+/* --------------------------------------------------------------------------
+   CORRECCIÓN — Persistencia completa del Plan Semanal (auditoría, prioridad 3)
+   Antes: solo se guardaba un registro {id, clienteId, fecha} en
+   hgw_planes; el contenido real de los 7 días (y sus ediciones) vivía
+   únicamente en la variable de memoria state.planActual y se perdía al
+   recargar, cambiar de vista o reseleccionar el cliente.
+   Ahora: el plan completo (incluidas las ediciones) se guarda en
+   hgw_planes, uno por cliente (al generar uno nuevo para un cliente que
+   ya tenía, se reemplaza). Se recupera automáticamente al entrar a la
+   vista o al seleccionar ese cliente en el desplegable.
+   -------------------------------------------------------------------------- */
+function obtenerPlanGuardado(clienteId) {
+  return state.planes.find(p => p.clienteId === clienteId) || null;
 }
 
-document.getElementById('btn-generar-plan').addEventListener('click', () => {
-  const clienteId = document.getElementById('plan-cliente').value;
-  const cliente = state.clientes.find(c => c.id === clienteId);
-  if (!cliente) { showToast('Registra al menos un cliente para generar un plan.', 'error'); return; }
+function guardarPlanSemanalCompleto(plan) {
+  const idx = state.planes.findIndex(p => p.clienteId === plan.clienteId);
+  if (idx >= 0) state.planes[idx] = plan;
+  else state.planes.push(plan);
+  persistPlanes();
+}
 
-  const plan = generarPlanSemanal(cliente);
+function mostrarResultadoPlan(cliente, plan) {
   state.planActual = plan;
   document.getElementById('plan-cliente-nombre').textContent = cliente.nombre;
   renderJustificacion('plan-justificacion', construirJustificacionPlan(cliente));
@@ -1218,11 +1268,38 @@ document.getElementById('btn-generar-plan').addEventListener('click', () => {
   document.getElementById('plan-productos').innerHTML = productosRecomendados(cliente.objetivo).map(productMiniCardHTML).join('') ||
     `<p style="color:var(--slate);font-size:14px">No hay productos activos asociados a este objetivo.</p>`;
   document.getElementById('plan-resultado-panel').classList.remove('hidden');
-
-  state.planes.push({ id: plan.id, clienteId: cliente.id, fecha: plan.fecha });
-  persistPlanes();
-  showToast('Plan semanal generado. Puedes editarlo antes de descargarlo.', 'success');
   refreshIcons();
+}
+
+function cargarPlanDelClienteSeleccionado() {
+  const clienteId = document.getElementById('plan-cliente').value;
+  const cliente = state.clientes.find(c => c.id === clienteId);
+  const planGuardado = clienteId ? obtenerPlanGuardado(clienteId) : null;
+  if (cliente && planGuardado) {
+    mostrarResultadoPlan(cliente, planGuardado);
+  } else {
+    state.planActual = null;
+    document.getElementById('plan-resultado-panel').classList.add('hidden');
+  }
+}
+
+function renderPlanSetup() {
+  const select = document.getElementById('plan-cliente');
+  select.innerHTML = state.clientes.map(c => `<option value="${c.id}">${escapeHTML(c.nombre)}</option>`).join('');
+  cargarPlanDelClienteSeleccionado();
+}
+
+document.getElementById('plan-cliente').addEventListener('change', cargarPlanDelClienteSeleccionado);
+
+document.getElementById('btn-generar-plan').addEventListener('click', () => {
+  const clienteId = document.getElementById('plan-cliente').value;
+  const cliente = state.clientes.find(c => c.id === clienteId);
+  if (!cliente) { showToast('Registra al menos un cliente para generar un plan.', 'error'); return; }
+
+  const plan = generarPlanSemanal(cliente);
+  guardarPlanSemanalCompleto(plan);
+  mostrarResultadoPlan(cliente, plan);
+  showToast('Plan semanal generado. Puedes editarlo antes de descargarlo; tus cambios se guardan automáticamente.', 'success');
 });
 
 function renderPlanGrid(plan) {
@@ -1242,6 +1319,7 @@ function renderPlanGrid(plan) {
       const idx = parseInt(el.dataset.planIdx);
       const field = el.dataset.planField;
       state.planActual.dias[idx][field] = el.value;
+      persistPlanes(); // Prioridad 3: cada edición del plan queda guardada de inmediato, no solo en memoria.
     });
   });
 }
@@ -1398,24 +1476,10 @@ function generarPlanDeportivo(cliente) {
   };
 }
 
-function renderDeportivoSetup() {
-  const select = document.getElementById('deportivo-cliente');
-  select.innerHTML = state.clientes.map(c => `<option value="${c.id}">${escapeHTML(c.nombre)}</option>`).join('');
-  document.getElementById('deportivo-resultado-panel').classList.add('hidden');
-}
-
-document.getElementById('btn-generar-deportivo').addEventListener('click', () => {
-  const clienteId = document.getElementById('deportivo-cliente').value;
-  const cliente = state.clientes.find(c => c.id === clienteId);
-  if (!cliente) { showToast('Registra al menos un cliente para generar un plan deportivo.', 'error'); return; }
-
-  const plan = generarPlanDeportivo(cliente);
+function renderResultadoDeportivo(cliente, registro) {
+  const plan = registro.datos;
   document.getElementById('deportivo-cliente-nombre').textContent = cliente.nombre;
-
-  const justificacion = construirJustificacionPlan(cliente).filter(([label]) =>
-    ['Objetivo', 'IMC calculado', 'Edad', 'Nivel de actividad'].includes(label));
-  justificacion.push(['Experiencia deportiva', capitalizar(cliente.experiencia)]);
-  renderJustificacion('deportivo-justificacion', justificacion);
+  renderJustificacion('deportivo-justificacion', registro.justificacion);
 
   const items = [
     ['Frecuencia semanal', plan.frecuencia],
@@ -1435,7 +1499,63 @@ document.getElementById('btn-generar-deportivo').addEventListener('click', () =>
       : '');
 
   document.getElementById('deportivo-resultado-panel').classList.remove('hidden');
-  showToast('Plan deportivo generado.', 'success');
+  refreshIcons();
+}
+
+/* --------------------------------------------------------------------------
+   CORRECCIÓN — Persistencia del Plan Deportivo (auditoría, prioridad 2)
+   Antes: generarPlanDeportivo() solo devolvía un objeto que se pintaba en
+   pantalla; no se guardaba en ninguna clave de localStorage y se perdía
+   al recargar o cambiar de vista.
+   Ahora: cada plan deportivo generado queda asociado al clienteId y
+   guardado en hgw_planes_deportivos (uno por cliente; al generar uno
+   nuevo para el mismo cliente, se reemplaza). Se recupera
+   automáticamente al entrar a la vista o al reseleccionar ese cliente.
+   -------------------------------------------------------------------------- */
+function obtenerPlanDeportivoGuardado(clienteId) {
+  return state.planesDeportivos.find(p => p.clienteId === clienteId) || null;
+}
+
+function guardarPlanDeportivo(registro) {
+  const idx = state.planesDeportivos.findIndex(p => p.clienteId === registro.clienteId);
+  if (idx >= 0) state.planesDeportivos[idx] = registro;
+  else state.planesDeportivos.push(registro);
+  persistPlanesDeportivos();
+}
+
+function cargarPlanDeportivoDelClienteSeleccionado() {
+  const clienteId = document.getElementById('deportivo-cliente').value;
+  const cliente = state.clientes.find(c => c.id === clienteId);
+  const registroGuardado = clienteId ? obtenerPlanDeportivoGuardado(clienteId) : null;
+  if (cliente && registroGuardado) {
+    renderResultadoDeportivo(cliente, registroGuardado);
+  } else {
+    document.getElementById('deportivo-resultado-panel').classList.add('hidden');
+  }
+}
+
+function renderDeportivoSetup() {
+  const select = document.getElementById('deportivo-cliente');
+  select.innerHTML = state.clientes.map(c => `<option value="${c.id}">${escapeHTML(c.nombre)}</option>`).join('');
+  cargarPlanDeportivoDelClienteSeleccionado();
+}
+
+document.getElementById('deportivo-cliente').addEventListener('change', cargarPlanDeportivoDelClienteSeleccionado);
+
+document.getElementById('btn-generar-deportivo').addEventListener('click', () => {
+  const clienteId = document.getElementById('deportivo-cliente').value;
+  const cliente = state.clientes.find(c => c.id === clienteId);
+  if (!cliente) { showToast('Registra al menos un cliente para generar un plan deportivo.', 'error'); return; }
+
+  const plan = generarPlanDeportivo(cliente);
+  const justificacion = construirJustificacionPlan(cliente).filter(([label]) =>
+    ['Objetivo', 'IMC calculado', 'Edad', 'Nivel de actividad'].includes(label));
+  justificacion.push(['Experiencia deportiva', capitalizar(cliente.experiencia)]);
+
+  const registro = { id: uid('pdep'), clienteId: cliente.id, fecha: todayISO(), datos: plan, justificacion };
+  guardarPlanDeportivo(registro);
+  renderResultadoDeportivo(cliente, registro);
+  showToast('Plan deportivo generado y guardado para este cliente.', 'success');
   refreshIcons();
 });
 
@@ -1482,6 +1602,7 @@ document.getElementById('btn-guardar-seguimiento').addEventListener('click', () 
     productos: document.getElementById('s-productos').value.trim(),
     proximoSeguimiento: document.getElementById('s-proximo').value,
     observaciones: document.getElementById('s-observaciones').value.trim(),
+    demo: false,
   };
   state.seguimientos.push(nuevo);
   persistSeguimientos();
@@ -1741,27 +1862,92 @@ function obtenerConteoSeguimientosPorSemana() {
 
 /* --------------------------------------------------------------------------
    19. LOGIN / SESIÓN
-   Nota técnica: acceso demostrativo únicamente. Para producción se debe
-   implementar autenticación real contra un backend seguro (hashing de
-   contraseñas, tokens de sesión firmados, HTTPS, control de intentos, etc.)
    -------------------------------------------------------------------------- */
+/* CORRECCIÓN (auditoría, prioridad 1): antes este formulario aceptaba
+   cualquier usuario y cualquier contraseña porque el handler nunca
+   comparaba los valores escritos contra nada — solo marcaba la sesión
+   como activa. Ahora sí se valida contra las credenciales reales del
+   emprendedor.
+
+   NOTA DE SEGURIDAD IMPORTANTE: esta sigue siendo una autenticación
+   LOCAL TEMPORAL para la fase de un solo emprendedor, calculada
+   enteramente en el navegador (no hay backend). NO es un sistema de
+   autenticación seguro de producción: cualquier persona con acceso a
+   las herramientas de desarrollador del navegador podría leer este
+   archivo y ver la contraseña. La migración a autenticación real
+   (backend + base de datos) queda pendiente para una fase posterior. */
+const CREDENCIALES_EMPRENDEDOR = {
+  usuario: 'HGW Rafer',
+  password: 'ForLife@HGW2026',
+};
+
+function mostrarErrorLogin(mensaje) {
+  const el = document.getElementById('login-error-msg');
+  el.textContent = mensaje;
+  el.classList.remove('hidden');
+}
+
+function limpiarErrorLogin() {
+  document.getElementById('login-error-msg').classList.add('hidden');
+  document.getElementById('login-user').closest('.field').classList.remove('field-error');
+  document.getElementById('login-pass').closest('.field').classList.remove('field-error');
+}
+
+// Un único handler de 'submit' del formulario cubre tanto el clic en el
+// botón (type="submit") como presionar Enter dentro de los campos: el
+// navegador dispara 'submit' en ambos casos, así que ambas vías ejecutan
+// exactamente esta misma validación.
 document.getElementById('login-form').addEventListener('submit', (e) => {
   e.preventDefault();
+  limpiarErrorLogin();
+
+  const usuarioEl = document.getElementById('login-user');
+  const passEl = document.getElementById('login-pass');
+  const usuario = usuarioEl.value.trim();
+  const password = passEl.value;
+
+  if (!usuario || !password) {
+    if (!usuario) usuarioEl.closest('.field').classList.add('field-error');
+    if (!password) passEl.closest('.field').classList.add('field-error');
+    mostrarErrorLogin('Ingresa tu usuario y tu contraseña para continuar.');
+    return;
+  }
+
+  if (usuario !== CREDENCIALES_EMPRENDEDOR.usuario || password !== CREDENCIALES_EMPRENDEDOR.password) {
+    usuarioEl.closest('.field').classList.add('field-error');
+    passEl.closest('.field').classList.add('field-error');
+    mostrarErrorLogin('Usuario o contraseña incorrectos. Verifica tus datos e intenta de nuevo.');
+    showToast('Usuario o contraseña incorrectos.', 'error');
+    return;
+  }
+
   Storage.set(LS_KEYS.session, true);
   mostrarApp();
-  showToast('Bienvenido de nuevo a HGW Wellness.', 'success');
+  showToast('Bienvenido, HGW Rafer.', 'success');
 });
 
 document.getElementById('btn-logout').addEventListener('click', () => {
   Storage.remove(LS_KEYS.session);
   document.getElementById('app').classList.add('hidden');
+  document.getElementById('login-form').reset();
+  limpiarErrorLogin();
   document.getElementById('login-screen').classList.remove('hidden');
 });
 
 function mostrarApp() {
+  // Guardia de seguridad (auditoría, prioridad 1): mostrarApp() ya NO
+  // revela el panel privado bajo ninguna circunstancia si no existe una
+  // sesión activa y válida guardada, sin importar desde qué punto del
+  // código se la llame. Antes, cualquier función que llamara a
+  // mostrarApp() exponía el panel sin validar nada.
+  if (Storage.get(LS_KEYS.session, false) !== true) {
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('public-app').classList.add('hidden');
+    document.getElementById('access-gate').classList.remove('hidden');
+    return;
+  }
   document.getElementById('login-screen').classList.add('hidden');
-  // Líneas añadidas para integrar la nueva puerta de acceso: se asegura de
-  // que el gate y el modo público queden ocultos al entrar al panel privado.
   document.getElementById('access-gate').classList.add('hidden');
   document.getElementById('public-app').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -2205,8 +2391,49 @@ document.getElementById('sidebar-close').addEventListener('click', closeMobileSi
 document.getElementById('mobile-overlay').addEventListener('click', closeMobileSidebar);
 
 document.getElementById('btn-reset-data').addEventListener('click', () => {
-  askConfirm('¿Reiniciar todos los datos a los valores demo iniciales? Se perderá la información actual.', resetDemoData);
+  askConfirm('Esto restablecerá ÚNICAMENTE los 4 clientes y 4 productos de EJEMPLO a sus valores originales (se perderán ediciones hechas sobre ellos). Tus clientes, productos, seguimientos, solicitudes de asesoría y reservas SPA reales NO se eliminarán ni se modificarán.', resetDemoData);
 });
+
+/* --------------------------------------------------------------------------
+   EXPORTACIÓN DE RESPALDO (NUEVO)
+   Genera y descarga una copia JSON de todos los datos actuales
+   (clientes, productos, seguimientos, planes semanales completos,
+   planes deportivos, solicitudes de asesoría y reservas SPA). Es
+   únicamente una copia de seguridad local para preparar la futura
+   migración a una base de datos real: no sustituye esa migración ni
+   crea ninguna sincronización automática.
+   -------------------------------------------------------------------------- */
+function exportarRespaldoJSON() {
+  const respaldo = {
+    generadoEn: new Date().toISOString(),
+    version: 'hgw-wellness-respaldo-v1',
+    clientes: state.clientes,
+    productos: state.productos,
+    seguimientos: state.seguimientos,
+    planesSemanales: state.planes,
+    planesDeportivos: state.planesDeportivos,
+    solicitudes: state.solicitudes,
+    spaReservas: state.spaReservas,
+  };
+
+  try {
+    const blob = new Blob([JSON.stringify(respaldo, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const enlace = document.createElement('a');
+    enlace.href = url;
+    enlace.download = `HGW_Wellness_respaldo_${todayISO()}.json`;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    URL.revokeObjectURL(url);
+    showToast('Respaldo exportado correctamente.', 'success');
+  } catch (e) {
+    console.error('Error exportando el respaldo', e);
+    showToast('No se pudo generar el respaldo. Intenta de nuevo.', 'error');
+  }
+}
+
+document.getElementById('btn-exportar-respaldo').addEventListener('click', exportarRespaldoJSON);
 
 document.getElementById('btn-confirm-action').addEventListener('click', () => {
   if (typeof state.confirmCallback === 'function') state.confirmCallback();
