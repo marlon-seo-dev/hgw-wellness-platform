@@ -79,7 +79,6 @@ const LS_KEYS = {
   planesDeportivos: 'hgw_planes_deportivos',
   solicitudes: 'hgw_solicitudes',
   spaReservas: 'hgw_spa_reservas',
-  session: 'hgw_session',
   seeded: 'hgw_seeded_v1',
 };
 
@@ -1864,23 +1863,22 @@ function obtenerConteoSeguimientosPorSemana() {
 /* --------------------------------------------------------------------------
    19. LOGIN / SESIÓN
    -------------------------------------------------------------------------- */
-/* CORRECCIÓN (auditoría, prioridad 1): antes este formulario aceptaba
-   cualquier usuario y cualquier contraseña porque el handler nunca
-   comparaba los valores escritos contra nada — solo marcaba la sesión
-   como activa. Ahora sí se valida contra las credenciales reales del
-   emprendedor.
+/* La autenticación se valida en el Worker y la sesión se mantiene mediante
+  la cookie HttpOnly emitida por su endpoint de login. */
+let sesionWorkerValida = false;
 
-   NOTA DE SEGURIDAD IMPORTANTE: esta sigue siendo una autenticación
-   LOCAL TEMPORAL para la fase de un solo emprendedor, calculada
-   enteramente en el navegador (no hay backend). NO es un sistema de
-   autenticación seguro de producción: cualquier persona con acceso a
-   las herramientas de desarrollador del navegador podría leer este
-   archivo y ver la contraseña. La migración a autenticación real
-   (backend + base de datos) queda pendiente para una fase posterior. */
-const CREDENCIALES_EMPRENDEDOR = {
-  usuario: 'HGW Rafer',
-  password: 'ForLife@HGW2026',
-};
+async function leerRespuestaJSON(respuesta) {
+  const texto = await respuesta.text();
+  if (!texto) return {};
+  try { return JSON.parse(texto); } catch { return {}; }
+}
+
+async function comprobarSesionWorker() {
+  const respuesta = await fetch(`${API_BASE_URL}/api/auth/session`, { credentials: 'include' });
+  const datos = await leerRespuestaJSON(respuesta);
+  sesionWorkerValida = respuesta.ok && datos.autenticado === true;
+  return sesionWorkerValida;
+}
 
 function mostrarErrorLogin(mensaje) {
   const el = document.getElementById('login-error-msg');
@@ -1898,7 +1896,7 @@ function limpiarErrorLogin() {
 // botón (type="submit") como presionar Enter dentro de los campos: el
 // navegador dispara 'submit' en ambos casos, así que ambas vías ejecutan
 // exactamente esta misma validación.
-document.getElementById('login-form').addEventListener('submit', (e) => {
+document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   limpiarErrorLogin();
 
@@ -1914,25 +1912,43 @@ document.getElementById('login-form').addEventListener('submit', (e) => {
     return;
   }
 
-  if (usuario !== CREDENCIALES_EMPRENDEDOR.usuario || password !== CREDENCIALES_EMPRENDEDOR.password) {
+  try {
+    const respuesta = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario, password }),
+    });
+    const datos = await leerRespuestaJSON(respuesta);
+    if (!respuesta.ok) {
+      throw new Error(datos.error || 'Usuario o contraseña incorrectos.');
+    }
+    if (!(await comprobarSesionWorker())) {
+      throw new Error('No se pudo confirmar la sesión.');
+    }
+    mostrarApp();
+    showToast(`Bienvenido, ${datos.usuario || usuario}.`, 'success');
+  } catch (error) {
     usuarioEl.closest('.field').classList.add('field-error');
     passEl.closest('.field').classList.add('field-error');
-    mostrarErrorLogin('Usuario o contraseña incorrectos. Verifica tus datos e intenta de nuevo.');
-    showToast('Usuario o contraseña incorrectos.', 'error');
-    return;
+    mostrarErrorLogin(error.message || 'No se pudo iniciar sesión.');
+    showToast(error.message || 'No se pudo iniciar sesión.', 'error');
   }
-
-  Storage.set(LS_KEYS.session, true);
-  mostrarApp();
-  showToast('Bienvenido, HGW Rafer.', 'success');
 });
 
-document.getElementById('btn-logout').addEventListener('click', () => {
-  Storage.remove(LS_KEYS.session);
-  document.getElementById('app').classList.add('hidden');
-  document.getElementById('login-form').reset();
-  limpiarErrorLogin();
-  document.getElementById('login-screen').classList.remove('hidden');
+document.getElementById('btn-logout').addEventListener('click', async () => {
+  try {
+    await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } finally {
+    sesionWorkerValida = false;
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-form').reset();
+    limpiarErrorLogin();
+    document.getElementById('access-gate').classList.remove('hidden');
+  }
 });
 
 function mostrarApp() {
@@ -1941,7 +1957,7 @@ function mostrarApp() {
   // sesión activa y válida guardada, sin importar desde qué punto del
   // código se la llame. Antes, cualquier función que llamara a
   // mostrarApp() exponía el panel sin validar nada.
-  if (Storage.get(LS_KEYS.session, false) !== true) {
+  if (!sesionWorkerValida) {
     document.getElementById('app').classList.add('hidden');
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('public-app').classList.add('hidden');
@@ -2460,12 +2476,12 @@ function init() {
   loadState();
   poblarFiltroObjetivos();
 
-  const sesionActiva = Storage.get(LS_KEYS.session, false);
-  if (sesionActiva) {
-    mostrarApp();
-  } else {
-    refreshIcons();
-  }
+  comprobarSesionWorker()
+    .then((sesionValida) => {
+      if (sesionValida) mostrarApp();
+    })
+    .catch(() => { sesionWorkerValida = false; })
+    .finally(() => refreshIcons());
   refreshIcons();
 }
 
