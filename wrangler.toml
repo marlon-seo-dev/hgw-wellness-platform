@@ -1,0 +1,37 @@
+# ==============================================================================
+# HGW WELLNESS / FOR LIFE — CONFIGURACIÓN DE CLOUDFLARE WORKER
+# ==============================================================================
+# Este archivo NO contiene secretos ni contraseñas — es seguro subirlo a
+# GitHub. Los valores marcados como "PENDIENTE" se completan una sola vez
+# tras ejecutar los comandos indicados en el informe de esta entrega.
+# ==============================================================================
+
+name = "hgw-wellness-api"
+main = "worker/index.js"
+compatibility_date = "2026-01-01"
+
+# Variables públicas (no secretas). ALLOWED_ORIGIN acepta una lista separada
+# por comas si en el futuro hay más de un frontend autorizado.
+[vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGIN = "https://PENDIENTE-tu-proyecto.pages.dev"
+
+# Base de datos D1. database_id se obtiene al crear la base con
+# `wrangler d1 create hgw_wellness_db` (ver informe, sección de comandos).
+[[d1_databases]]
+binding = "DB"
+database_name = "hgw_wellness_db"
+database_id = "PENDIENTE-completar-tras-crear-la-base"
+
+# ------------------------------------------------------------------------------
+# Entorno de desarrollo local (wrangler dev). Usa la misma base D1 en modo
+# --local (archivo SQLite local, no toca la base real de producción) y
+# desactiva el flag "Secure" de la cookie porque wrangler dev sirve por HTTP.
+# ------------------------------------------------------------------------------
+[env.development]
+vars = { ENVIRONMENT = "development", ALLOWED_ORIGIN = "http://localhost:8788" }
+
+[[env.development.d1_databases]]
+binding = "DB"
+database_name = "hgw_wellness_db"
+database_id = "PENDIENTE-completar-tras-crear-la-base"

@@ -1,0 +1,9 @@
+# Copia este archivo como .dev.vars (sin ".example") para desarrollo LOCAL
+# con `wrangler dev`. .dev.vars.example sí se sube a GitHub (no tiene
+# valores reales); .dev.vars NUNCA debe subirse — agrégalo a .gitignore.
+#
+# En producción, este mismo valor se define con:
+#   wrangler secret put PEPPER
+# (no se define en wrangler.toml ni en ningún archivo versionado).
+
+PEPPER=reemplaza-esto-por-una-cadena-aleatoria-larga-solo-en-tu-máquina
