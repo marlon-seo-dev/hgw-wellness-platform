@@ -69,6 +69,7 @@ const SPA_SERVICIOS = [
 ];
 const SPA_DESCRIPCION_GENERICA = 'Servicio ofrecido por SPA Loren. Duración y detalles se confirman directamente al agendar.';
 
+const API_BASE_URL = 'https://hgw-wellness-api.marlonsherrera7002.workers.dev';
 
 const LS_KEYS = {
   clientes: 'hgw_clientes',
@@ -2280,7 +2281,7 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
 
   let respuesta;
   try {
-    respuesta = await fetch('/api/consultation-requests', {
+    respuesta = await fetch(`${API_BASE_URL}/api/consultation-requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(solicitud),
