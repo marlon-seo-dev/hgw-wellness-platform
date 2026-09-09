@@ -78,7 +78,6 @@ const LS_KEYS = {
   planes: 'hgw_planes',
   planesDeportivos: 'hgw_planes_deportivos',
   solicitudes: 'hgw_solicitudes',
-  spaReservas: 'hgw_spa_reservas',
   seeded: 'hgw_seeded_v1',
 };
 
@@ -334,7 +333,6 @@ function loadState() {
   state.planes = Storage.get(LS_KEYS.planes, []);
   state.planesDeportivos = Storage.get(LS_KEYS.planesDeportivos, []);
   state.solicitudes = Storage.get(LS_KEYS.solicitudes, []);
-  state.spaReservas = Storage.get(LS_KEYS.spaReservas, []);
 }
 
 function persistClientes() { Storage.set(LS_KEYS.clientes, state.clientes); }
@@ -343,7 +341,6 @@ function persistProductos() { Storage.set(LS_KEYS.productos, state.productos); }
 function persistPlanes() { Storage.set(LS_KEYS.planes, state.planes); }
 function persistPlanesDeportivos() { Storage.set(LS_KEYS.planesDeportivos, state.planesDeportivos); }
 function persistSolicitudes() { Storage.set(LS_KEYS.solicitudes, state.solicitudes); }
-function persistSpaReservas() { Storage.set(LS_KEYS.spaReservas, state.spaReservas); }
 
 /* --------------------------------------------------------------------------
    5. UTILIDADES GENERALES
@@ -488,9 +485,9 @@ function renderCurrentView() {
     case 'seguimientos': renderSeguimientos(); break;
     case 'productos': renderProductos(); break;
     case 'estadisticas': renderEstadisticas(); break;
-    case 'solicitudes': renderSolicitudes(); break;
+    case 'solicitudes': cargarSolicitudes(); break;
     case 'deportivo': renderDeportivoSetup(); break;
-    case 'spa': renderSpaReservas(); break;
+    case 'spa': renderSpaReservas(); cargarReservasSpa(); break;
   }
 }
 
@@ -1972,21 +1969,11 @@ function mostrarApp() {
 }
 
 /* --------------------------------------------------------------------------
-   21. ACCESO PÚBLICO (NUEVO)
-   Todo este bloque es aditivo: no modifica ninguna función de las
-   secciones 1-20. Reutiliza utilidades ya existentes (Storage, uid,
-   showToast, clearFieldErrors, marcarError, escapeHTML, todayISO,
-   formatearFecha, productMiniCardHTML, refreshIcons) tal como están.
-
-   IMPORTANTE — límite técnico honesto: como este proyecto no tiene
-   backend ni base de datos, "hgw_solicitudes" vive únicamente en el
-   localStorage del navegador donde se llenó el formulario. El listado
-   privado de abajo solo puede mostrar solicitudes hechas desde ESE
-   MISMO navegador/dispositivo. Para que el emprendedor vea en tiempo
-   real las solicitudes hechas por clientes en sus propios celulares,
-   se necesitaría un backend real (API + base de datos) que reciba el
-   formulario y guarde el registro de forma centralizada.
-   -------------------------------------------------------------------------- */
+  21. ACCESO PÚBLICO (NUEVO)
+  Las solicitudes de asesoría y las reservas SPA se guardan en
+  Cloudflare D1 mediante el Worker y son visibles desde cualquier
+  dispositivo autorizado donde el emprendedor inicie sesión.
+  -------------------------------------------------------------------------- */
 
 /* --- Puerta de acceso: navegación entre gate / login / público --- */
 document.getElementById('gate-btn-privado').addEventListener('click', () => {
@@ -2045,10 +2032,9 @@ function renderPublicProducts() {
 /* --------------------------------------------------------------------------
    21.1 SPA (NUEVO)
    Catálogo, reserva pública y gestión privada de sesiones de SPA Loren.
-   Mismo patrón ya usado para el formulario de asesoría: validación con
-   clearFieldErrors/marcarError, código único generado en el navegador,
-   y almacenamiento separado (hgw_spa_reservas) con la misma advertencia
-   de límite técnico (solo visible en el navegador donde se reservó).
+  Mismo patrón ya usado para el formulario de asesoría: validación con
+  clearFieldErrors/marcarError. Las reservas se persisten y consultan en D1
+  mediante el Worker para que estén disponibles desde cualquier dispositivo.
    -------------------------------------------------------------------------- */
 function spaServiceCardHTML(s) {
   return `<div class="product-card">
@@ -2068,13 +2054,6 @@ function renderSpaServicios() {
 
 function poblarSpaTipoSelect() {
   document.getElementById('spa-tipo').innerHTML = SPA_SERVICIOS.map(s => `<option value="${s.id}">${escapeHTML(s.nombre)}</option>`).join('');
-}
-
-function generarCodigoSPA() {
-  const caracteres = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let sufijo = '';
-  for (let i = 0; i < 5; i++) sufijo += caracteres[Math.floor(Math.random() * caracteres.length)];
-  return `SPA-KR-${sufijo}`;
 }
 
 function validarSpaForm() {
@@ -2124,29 +2103,47 @@ function validarSpaForm() {
   return valido;
 }
 
-document.getElementById('btn-reservar-spa').addEventListener('click', () => {
+document.getElementById('btn-reservar-spa').addEventListener('click', async () => {
   if (!validarSpaForm()) {
     showToast('Revisa los campos marcados en el formulario.', 'error');
     return;
   }
 
   const tipo = SPA_SERVICIOS.find(s => s.id === document.getElementById('spa-tipo').value);
-  const reserva = {
-    id: uid('spa'),
-    codigo: generarCodigoSPA(),
-    tipoId: tipo.id,
-    tipoNombre: tipo.nombre,
+  const datosReserva = {
+    tipo_id: tipo.id,
+    tipo_nombre: tipo.nombre,
     fecha: document.getElementById('spa-fecha').value,
     hora: document.getElementById('spa-hora').value,
     nombre: document.getElementById('spa-nombre').value.trim(),
     telefono: document.getElementById('spa-telefono').value.trim(),
     correo: document.getElementById('spa-correo').value.trim(),
     observaciones: document.getElementById('spa-observaciones').value.trim(),
-    estado: 'pendiente',
   };
 
-  state.spaReservas.push(reserva);
-  persistSpaReservas();
+  let reserva;
+  try {
+    const respuesta = await fetch(`${API_BASE_URL}/api/spa-reservations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(datosReserva),
+    });
+    const datos = await leerRespuestaJSON(respuesta);
+    if (!respuesta.ok || !datos.id || !datos.codigo) {
+      throw new Error(datos.error || 'No se pudo registrar la reserva.');
+    }
+    reserva = {
+      ...datosReserva,
+      id: datos.id,
+      codigo: datos.codigo,
+      tipoId: datosReserva.tipo_id,
+      tipoNombre: datosReserva.tipo_nombre,
+      estado: 'pendiente',
+    };
+  } catch (error) {
+    showToast(error.message || 'No se pudo registrar la reserva.', 'error');
+    return;
+  }
 
   document.getElementById('spa-codigo-generado').textContent = reserva.codigo;
 
@@ -2178,14 +2175,43 @@ document.getElementById('btn-nueva-reserva-spa').addEventListener('click', () =>
   document.getElementById('spa-form-panel').classList.remove('hidden');
 });
 
-/* --- Vista privada: listado de reservas SPA (misma advertencia de
-   límite técnico que en Solicitudes de asesoría: solo se ven las
-   reservas hechas desde este mismo navegador). --- */
+/* --- Vista privada: listado de reservas SPA cargado desde D1. --- */
 const ESTADOS_SPA = ['pendiente', 'confirmada', 'reprogramada', 'cancelada', 'atendida'];
 const BADGE_POR_ESTADO_SPA = {
   pendiente: 'badge-warning', confirmada: 'badge-success', reprogramada: 'badge-muted',
   cancelada: 'badge-danger', atendida: 'badge-success',
 };
+
+function normalizarReservaSpa(reserva) {
+  return {
+    id: reserva.id,
+    codigo: reserva.codigo,
+    tipoId: reserva.tipo_id,
+    tipoNombre: reserva.tipo_nombre,
+    fecha: reserva.fecha,
+    hora: reserva.hora,
+    nombre: reserva.nombre,
+    telefono: reserva.telefono,
+    correo: reserva.correo,
+    observaciones: reserva.observaciones,
+    estado: reserva.estado,
+  };
+}
+
+async function cargarReservasSpa() {
+  try {
+    const respuesta = await fetch(`${API_BASE_URL}/api/spa-reservations`, { credentials: 'include' });
+    const datos = await leerRespuestaJSON(respuesta);
+    if (!respuesta.ok || !Array.isArray(datos)) {
+      throw new Error(datos.error || 'No se pudieron cargar las reservas.');
+    }
+    state.spaReservas = datos.map(normalizarReservaSpa);
+  } catch (error) {
+    state.spaReservas = [];
+    showToast(error.message || 'No se pudieron cargar las reservas.', 'error');
+  }
+  renderSpaReservas();
+}
 
 function renderSpaReservas() {
   const busqueda = (document.getElementById('buscar-spa').value || '').toLowerCase();
@@ -2222,12 +2248,25 @@ function renderSpaReservas() {
       </tr>`).join('');
 
     tbody.querySelectorAll('[data-spa-estado]').forEach(select => {
-      select.addEventListener('change', () => {
+      select.addEventListener('change', async () => {
         const r = state.spaReservas.find(x => x.id === select.dataset.spaEstado);
-        r.estado = select.value;
-        persistSpaReservas();
-        showToast(`Reserva marcada como ${r.estado}.`, 'success');
-        renderSpaReservas();
+        const estadoAnterior = r.estado;
+        try {
+          const respuesta = await fetch(`${API_BASE_URL}/api/spa-reservations/${r.id}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: select.value }),
+          });
+          const datos = await leerRespuestaJSON(respuesta);
+          if (!respuesta.ok) throw new Error(datos.error || 'No se pudo actualizar la reserva.');
+          r.estado = select.value;
+          showToast(`Reserva marcada como ${r.estado}.`, 'success');
+          renderSpaReservas();
+        } catch (error) {
+          select.value = estadoAnterior;
+          showToast(error.message || 'No se pudo actualizar la reserva.', 'error');
+        }
       });
     });
   }
@@ -2302,7 +2341,7 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(solicitud),
     });
-    const datos = await respuesta.json();
+    const datos = await leerRespuestaJSON(respuesta);
     if (!respuesta.ok || !datos.codigo) {
       throw new Error(datos.error || 'No se pudo registrar la solicitud.');
     }
@@ -2314,9 +2353,6 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
     showToast(error.message || 'No se pudo registrar la solicitud.', 'error');
     return;
   }
-
-  state.solicitudes.push(solicitud);
-  persistSolicitudes();
 
   document.getElementById('codigo-generado').textContent = solicitud.codigo;
   document.getElementById('asesoria-form-panel').classList.add('hidden');
@@ -2341,8 +2377,38 @@ document.getElementById('btn-nueva-solicitud').addEventListener('click', () => {
   document.getElementById('asesoria-form-panel').classList.remove('hidden');
 });
 
-/* --- Vista privada: listado de solicitudes recibidas (ver nota legal
-   de límite técnico al inicio de esta sección). --- */
+/* --- Vista privada: listado de solicitudes recibidas desde D1. --- */
+function normalizarSolicitud(solicitud) {
+  return {
+    id: solicitud.id,
+    codigo: solicitud.codigo,
+    nombre: solicitud.nombre,
+    telefono: solicitud.telefono,
+    correo: solicitud.correo,
+    negocio: solicitud.negocio,
+    ciudad: solicitud.ciudad,
+    motivo: solicitud.motivo,
+    preferencia: solicitud.preferencia,
+    fecha: solicitud.fecha,
+    estado: solicitud.estado,
+  };
+}
+
+async function cargarSolicitudes() {
+  try {
+    const respuesta = await fetch(`${API_BASE_URL}/api/consultation-requests`, { credentials: 'include' });
+    const datos = await leerRespuestaJSON(respuesta);
+    if (!respuesta.ok || !Array.isArray(datos)) {
+      throw new Error(datos.error || 'No se pudieron cargar las solicitudes.');
+    }
+    state.solicitudes = datos.map(normalizarSolicitud);
+  } catch (error) {
+    state.solicitudes = [];
+    showToast(error.message || 'No se pudieron cargar las solicitudes.', 'error');
+  }
+  renderSolicitudes();
+}
+
 function renderSolicitudes() {
   const busqueda = (document.getElementById('buscar-solicitud').value || '').toLowerCase();
   const lista = state.solicitudes
@@ -2376,12 +2442,27 @@ function renderSolicitudes() {
       </tr>`).join('');
 
     tbody.querySelectorAll('[data-sol-toggle]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const s = state.solicitudes.find(x => x.id === btn.dataset.solToggle);
-        s.estado = s.estado === 'atendida' ? 'pendiente' : 'atendida';
-        persistSolicitudes();
-        renderSolicitudes();
-        showToast(`Solicitud marcada como ${s.estado === 'atendida' ? 'atendida' : 'pendiente'}.`, 'success');
+        const estadoAnterior = s.estado;
+        const nuevoEstado = s.estado === 'atendida' ? 'pendiente' : 'atendida';
+        try {
+          const respuesta = await fetch(`${API_BASE_URL}/api/consultation-requests/${s.id}`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ estado: nuevoEstado }),
+          });
+          const datos = await leerRespuestaJSON(respuesta);
+          if (!respuesta.ok) throw new Error(datos.error || 'No se pudo actualizar la solicitud.');
+          s.estado = nuevoEstado;
+          renderSolicitudes();
+          showToast(`Solicitud marcada como ${s.estado === 'atendida' ? 'atendida' : 'pendiente'}.`, 'success');
+        } catch (error) {
+          s.estado = estadoAnterior;
+          renderSolicitudes();
+          showToast(error.message || 'No se pudo actualizar la solicitud.', 'error');
+        }
       });
     });
   }
