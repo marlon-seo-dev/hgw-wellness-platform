@@ -43,8 +43,10 @@ const resultados = [];
 const log = (etiqueta, ok, detalle) => resultados.push({ etiqueta, ok, detalle: detalle || '' });
 
 // ---- Crear el usuario inicial exactamente como lo haría el comando wrangler d1 execute del informe ----
+// Credenciales SOLO de prueba: viven en la base SQLite en memoria de este
+// arnés y no tienen relación con el usuario real de producción.
 const USUARIO = 'HGW Rafer';
-const PASSWORD = 'ForLife@HGW2026';
+const PASSWORD = crypto.randomBytes(12).toString('base64url');
 const salt = crypto.randomBytes(16).toString('hex');
 const hash = crypto.pbkdf2Sync(PASSWORD + env.PEPPER, Buffer.from(salt, 'hex'), 100000, 32, 'sha256').toString('hex');
 db.prepare(`INSERT INTO users (id, username, brand_name, password_hash, password_salt) VALUES (?, ?, ?, ?, ?)`)

@@ -6,7 +6,7 @@
  * escrita en ningún archivo del repositorio ni en GitHub.
  *
  * Uso:
- *   node worker/tools/generar-hash-usuario.js "ForLife@HGW2026" "el-mismo-PEPPER-que-configuraste-con-wrangler-secret-put"
+ *   node worker/tools/generar-hash-usuario.js "<contraseña-real>" "el-mismo-PEPPER-que-configuraste-con-wrangler-secret-put"
  *
  * El resultado (salt y hash) se pega directamente en el comando
  * `wrangler d1 execute` que se indica en el informe de esta entrega.
