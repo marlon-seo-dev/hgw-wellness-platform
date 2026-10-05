@@ -2,7 +2,7 @@
    HGW WELLNESS — LÓGICA DE APLICACIÓN
    Organización del archivo:
    1. Constantes y catálogo de objetivos
-   2. Almacenamiento (localStorage)
+   2. Almacenamiento (localStorage como caché) + API / sincronización D1
    3. Datos demo (seed)
    4. Estado de aplicación
    5. Utilidades generales
@@ -79,6 +79,8 @@ const LS_KEYS = {
   planesDeportivos: 'hgw_planes_deportivos',
   solicitudes: 'hgw_solicitudes',
   seeded: 'hgw_seeded_v1',
+  apiToken: 'hgw_api_token',
+  migradoD1: 'hgw_migrado_d1_v1',
 };
 
 /* --------------------------------------------------------------------------
@@ -301,7 +303,6 @@ function resetDemoData() {
   persistClientes();
   persistSeguimientos();
 
-  loadState();
   renderCurrentView();
   showToast('Datos de ejemplo restablecidos. Tus clientes, productos, seguimientos, solicitudes y reservas SPA reales no fueron modificados.', 'success');
 }
@@ -317,6 +318,7 @@ const state = {
   planesDeportivos: [],
   solicitudes: [],
   spaReservas: [],
+  productosPublicos: null,
   currentView: 'dashboard',
   currentClienteId: null,
   currentPerfilTab: 'info',
@@ -335,12 +337,302 @@ function loadState() {
   state.solicitudes = Storage.get(LS_KEYS.solicitudes, []);
 }
 
-function persistClientes() { Storage.set(LS_KEYS.clientes, state.clientes); }
-function persistSeguimientos() { Storage.set(LS_KEYS.seguimientos, state.seguimientos); }
-function persistProductos() { Storage.set(LS_KEYS.productos, state.productos); }
-function persistPlanes() { Storage.set(LS_KEYS.planes, state.planes); }
-function persistPlanesDeportivos() { Storage.set(LS_KEYS.planesDeportivos, state.planesDeportivos); }
-function persistSolicitudes() { Storage.set(LS_KEYS.solicitudes, state.solicitudes); }
+/* Cada persist*() guarda la caché local (render inmediato, sin esperar a la
+   red) y marca la colección para sincronizarla con D1 a través del Worker.
+   La base de datos es la fuente de verdad: al iniciar sesión se recarga
+   todo desde D1 (ver cargarDatosRemotos). */
+function persistClientes() { Storage.set(LS_KEYS.clientes, state.clientes); marcarParaSincronizar('clientes'); }
+function persistSeguimientos() { Storage.set(LS_KEYS.seguimientos, state.seguimientos); marcarParaSincronizar('seguimientos'); }
+function persistProductos() { Storage.set(LS_KEYS.productos, state.productos); marcarParaSincronizar('productos'); }
+function persistPlanes() { Storage.set(LS_KEYS.planes, state.planes); marcarParaSincronizar('planes'); }
+function persistPlanesDeportivos() { Storage.set(LS_KEYS.planesDeportivos, state.planesDeportivos); marcarParaSincronizar('planesDeportivos'); }
+
+/* --------------------------------------------------------------------------
+   4.1 API DEL WORKER + SINCRONIZACIÓN CON CLOUDFLARE D1
+   El token de sesión se envía como "Authorization: Bearer": Pages
+   (*.pages.dev) y el Worker (*.workers.dev) son dominios distintos y la
+   mayoría de navegadores bloquean la cookie de sesión por ser de terceros,
+   lo que hacía que todo GET/PUT/DELETE privado respondiera 401.
+   -------------------------------------------------------------------------- */
+function obtenerTokenApi() {
+  try { return localStorage.getItem(LS_KEYS.apiToken); } catch { return null; }
+}
+function guardarTokenApi(token) {
+  try {
+    if (token) localStorage.setItem(LS_KEYS.apiToken, token);
+    else localStorage.removeItem(LS_KEYS.apiToken);
+  } catch { /* almacenamiento no disponible: se sigue intentando con la cookie */ }
+}
+
+async function apiFetch(ruta, { method = 'GET', body, keepalive = false } = {}) {
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const token = obtenerTokenApi();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const respuesta = await fetch(`${API_BASE_URL}/api${ruta}`, {
+    method,
+    headers,
+    credentials: 'include',
+    keepalive,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const datos = await leerRespuestaJSON(respuesta);
+  if (!respuesta.ok) {
+    const error = new Error(datos.error || `Error ${respuesta.status} del servidor.`);
+    error.status = respuesta.status;
+    throw error;
+  }
+  return datos;
+}
+
+function parseJSONSeguro(texto, fallback) {
+  if (texto === null || texto === undefined || texto === '') return fallback;
+  try { return JSON.parse(texto); } catch { return fallback; }
+}
+const aEntero01 = (v) => (v ? 1 : 0);
+const vacioANull = (v) => (v === '' || v === undefined || Number.isNaN(v) ? null : v);
+
+/* --- Conversión frontend (camelCase) <-> columnas D1 (snake_case) --- */
+const MAPEO_D1 = {
+  clientes: {
+    aDb: (c) => ({
+      id: c.id, nombre: c.nombre, telefono: c.telefono, correo: c.correo,
+      edad: vacioANull(c.edad), fecha_registro: c.fechaRegistro,
+      peso: vacioANull(c.peso), talla: vacioANull(c.talla),
+      objetivo: c.objetivo, actividad: c.actividad, agua: vacioANull(c.agua),
+      sexo: c.sexo, experiencia: c.experiencia, preferencias: c.preferencias,
+      restricciones: c.restricciones, evitar: c.evitar, habitos: c.habitos,
+      observaciones: c.observaciones, proximo_seguimiento: c.proximoSeguimiento || '',
+      historial_peso_json: JSON.stringify(c.historialPeso || []), demo: aEntero01(c.demo),
+    }),
+    desdeDb: (r) => ({
+      id: r.id, nombre: r.nombre, telefono: r.telefono || '', correo: r.correo || '',
+      edad: r.edad, fechaRegistro: r.fecha_registro || '', peso: r.peso, talla: r.talla,
+      objetivo: r.objetivo, actividad: r.actividad, agua: r.agua,
+      sexo: r.sexo || '', experiencia: r.experiencia || '', preferencias: r.preferencias || '',
+      restricciones: r.restricciones || '', evitar: r.evitar || '', habitos: r.habitos || '',
+      observaciones: r.observaciones || '', proximoSeguimiento: r.proximo_seguimiento || '',
+      historialPeso: parseJSONSeguro(r.historial_peso_json, []), demo: r.demo === 1,
+    }),
+  },
+  productos: {
+    aDb: (p) => ({
+      id: p.id, nombre: p.nombre, categoria: p.categoria, descripcion: p.descripcion,
+      imagen: p.imagen, ingredientes: p.ingredientes, modo_de_uso: p.modoDeUso,
+      advertencias: p.advertencias,
+      objetivos_compatibles_json: JSON.stringify(p.objetivosCompatibles || []),
+      activo: aEntero01(p.activo), demo: aEntero01(p.demo),
+    }),
+    desdeDb: (r) => ({
+      id: r.id, nombre: r.nombre, categoria: r.categoria || '', descripcion: r.descripcion || '',
+      imagen: r.imagen || '', ingredientes: r.ingredientes || '', modoDeUso: r.modo_de_uso || '',
+      advertencias: r.advertencias || '',
+      objetivosCompatibles: parseJSONSeguro(r.objetivos_compatibles_json, []),
+      activo: r.activo === 1, demo: r.demo === 1,
+    }),
+  },
+  seguimientos: {
+    aDb: (s) => ({
+      id: s.id, client_id: s.clienteId, fecha: s.fecha, peso: vacioANull(s.peso),
+      cumplimiento: s.cumplimiento, hidratacion: vacioANull(s.hidratacion), actividad: s.actividad,
+      bienestar: s.bienestar, productos: s.productos, proximo_seguimiento: s.proximoSeguimiento || '',
+      observaciones: s.observaciones, demo: aEntero01(s.demo),
+    }),
+    desdeDb: (r) => ({
+      id: r.id, clienteId: r.client_id, fecha: r.fecha, peso: r.peso,
+      cumplimiento: r.cumplimiento || '', hidratacion: r.hidratacion, actividad: r.actividad || '',
+      bienestar: r.bienestar || '', productos: r.productos || '',
+      proximoSeguimiento: r.proximo_seguimiento || '', observaciones: r.observaciones || '',
+      demo: r.demo === 1,
+    }),
+  },
+  planes: {
+    aDb: (p) => ({ client_id: p.clienteId, objetivo: p.objetivo, fecha: p.fecha, dias_json: JSON.stringify(p.dias || []) }),
+    desdeDb: (r) => ({ id: r.id, clienteId: r.client_id, objetivo: r.objetivo, fecha: r.fecha, dias: parseJSONSeguro(r.dias_json, []) }),
+  },
+  planesDeportivos: {
+    aDb: (p) => ({
+      client_id: p.clienteId, fecha: p.fecha,
+      datos_json: JSON.stringify(p.datos || {}), justificacion_json: JSON.stringify(p.justificacion || []),
+    }),
+    desdeDb: (r) => ({
+      id: r.id, clienteId: r.client_id, fecha: r.fecha,
+      datos: parseJSONSeguro(r.datos_json, {}), justificacion: parseJSONSeguro(r.justificacion_json, []),
+    }),
+  },
+};
+
+/* Orden de sincronización: los clientes deben existir en D1 antes que sus
+   seguimientos y planes (el Worker valida client_id contra el usuario).
+   - crud: POST (nuevo) / PUT (modificado) / DELETE (eliminado), por id.
+   - upsert: un registro vigente por cliente; POST reemplaza el anterior.
+     Al borrar un cliente, D1 elimina sus planes por ON DELETE CASCADE. */
+const RECURSOS_D1 = [
+  { nombre: 'productos', ruta: '/products', modo: 'crud', clave: (x) => x.id },
+  { nombre: 'clientes', ruta: '/clients', modo: 'crud', clave: (x) => x.id },
+  { nombre: 'seguimientos', ruta: '/follow-ups', modo: 'crud', clave: (x) => x.id },
+  { nombre: 'planes', ruta: '/weekly-plans', modo: 'upsert', clave: (x) => x.clienteId },
+  { nombre: 'planesDeportivos', ruta: '/sports-plans', modo: 'upsert', clave: (x) => x.clienteId },
+];
+
+const sincronizacion = {
+  listo: false,            // true cuando el estado ya se cargó desde D1
+  cargando: false,
+  pendientes: new Set(),   // colecciones con cambios aún no enviados
+  temporizador: null,
+  cola: Promise.resolve(), // serializa los envíos para respetar el orden
+  // Última versión confirmada en D1 de cada registro: { coleccion: Map(clave -> JSON) }
+  instantaneas: Object.fromEntries(RECURSOS_D1.map(r => [r.nombre, new Map()])),
+  avisoSinConexion: false,
+};
+
+function serializarRegistro(cfg, registro) {
+  return JSON.stringify(MAPEO_D1[cfg.nombre].aDb(registro));
+}
+
+function tomarInstantanea(cfg) {
+  const mapa = new Map();
+  state[cfg.nombre].forEach(r => mapa.set(cfg.clave(r), serializarRegistro(cfg, r)));
+  sincronizacion.instantaneas[cfg.nombre] = mapa;
+}
+
+function marcarParaSincronizar(nombre) {
+  sincronizacion.pendientes.add(nombre);
+  if (!sincronizacion.listo || !sesionWorkerValida) {
+    if (sesionWorkerValida && !sincronizacion.cargando && !sincronizacion.avisoSinConexion) {
+      sincronizacion.avisoSinConexion = true;
+      showToast('Sin conexión con la base de datos: el cambio quedó solo en este dispositivo.', 'error');
+    }
+    return;
+  }
+  // Debounce: agrupa ráfagas (p. ej. cada tecla al editar el plan semanal).
+  clearTimeout(sincronizacion.temporizador);
+  sincronizacion.temporizador = setTimeout(sincronizarPendientes, 400);
+}
+
+function sincronizarPendientes({ keepalive = false } = {}) {
+  clearTimeout(sincronizacion.temporizador);
+  if (!sincronizacion.listo || !sesionWorkerValida || sincronizacion.pendientes.size === 0) {
+    return sincronizacion.cola;
+  }
+  const nombres = new Set(sincronizacion.pendientes);
+  sincronizacion.pendientes.clear();
+  sincronizacion.cola = sincronizacion.cola
+    .then(async () => {
+      for (const cfg of RECURSOS_D1) {
+        if (nombres.has(cfg.nombre)) await sincronizarColeccion(cfg, keepalive);
+      }
+    })
+    .catch((error) => {
+      // Lo que no se pudo enviar se reintenta en el próximo cambio.
+      nombres.forEach(n => sincronizacion.pendientes.add(n));
+      if (error.status === 401) return manejarSesionExpirada();
+      console.error('Error sincronizando con D1', error);
+      showToast(`No se pudo guardar en la base de datos: ${error.message}`, 'error');
+    });
+  return sincronizacion.cola;
+}
+
+async function sincronizarColeccion(cfg, keepalive) {
+  const anterior = sincronizacion.instantaneas[cfg.nombre];
+  const actual = new Map();
+  state[cfg.nombre].forEach(r => actual.set(cfg.clave(r), r));
+
+  for (const [clave, registro] of actual) {
+    const payload = MAPEO_D1[cfg.nombre].aDb(registro);
+    const serializado = JSON.stringify(payload);
+    if (anterior.get(clave) === serializado) continue;
+
+    try {
+      if (cfg.modo === 'upsert' || !anterior.has(clave)) {
+        await apiFetch(cfg.ruta, { method: 'POST', body: payload, keepalive });
+      } else {
+        try {
+          await apiFetch(`${cfg.ruta}/${encodeURIComponent(clave)}`, { method: 'PUT', body: payload, keepalive });
+        } catch (error) {
+          if (error.status !== 404) throw error;
+          await apiFetch(cfg.ruta, { method: 'POST', body: payload, keepalive }); // no existía en D1
+        }
+      }
+    } catch (error) {
+      // 404 en un POST = el cliente asociado ya no existe (p. ej. un plan de
+      // un cliente eliminado). Se omite para no bloquear el resto de la cola.
+      if (error.status !== 404) throw error;
+      console.warn(`Registro omitido en ${cfg.nombre}: ${error.message}`, registro);
+    }
+    anterior.set(clave, serializado);
+  }
+
+  if (cfg.modo !== 'crud') return;
+  for (const clave of [...anterior.keys()]) {
+    if (actual.has(clave)) continue;
+    try {
+      await apiFetch(`${cfg.ruta}/${encodeURIComponent(clave)}`, { method: 'DELETE', keepalive });
+    } catch (error) {
+      // 404: ya no existía (p. ej. seguimientos borrados en cascada con su cliente).
+      if (error.status !== 404) throw error;
+    }
+    anterior.delete(clave);
+  }
+}
+
+/* Carga clientes, productos, seguimientos y planes desde D1 y los deja como
+   estado de la aplicación. La primera vez en un dispositivo, si D1 está
+   vacío y este navegador tenía datos guardados solo en localStorage, se
+   suben a D1 para no perderlos (migración única). */
+async function cargarDatosRemotos() {
+  sincronizacion.listo = false;
+  sincronizacion.cargando = true;
+  try {
+    const listas = await Promise.all(RECURSOS_D1.map(cfg => apiFetch(cfg.ruta)));
+    const remotoVacio = listas.slice(0, 3).every(l => Array.isArray(l) && l.length === 0);
+    const hayDatosLocales = state.clientes.length > 0 || state.productos.length > 0;
+    const migrar = remotoVacio && hayDatosLocales && !Storage.get(LS_KEYS.migradoD1, false);
+
+    RECURSOS_D1.forEach((cfg, i) => {
+      if (migrar) {
+        sincronizacion.instantaneas[cfg.nombre] = new Map();
+        sincronizacion.pendientes.add(cfg.nombre);
+        return;
+      }
+      // D1 devuelve created_at DESC; se invierte para conservar el orden de alta.
+      const filas = Array.isArray(listas[i]) ? [...listas[i]].reverse() : [];
+      state[cfg.nombre] = filas.map(MAPEO_D1[cfg.nombre].desdeDb);
+      Storage.set(LS_KEYS[cfg.nombre], state[cfg.nombre]);
+      tomarInstantanea(cfg);
+      sincronizacion.pendientes.delete(cfg.nombre);
+    });
+
+    sincronizacion.listo = true;
+    sincronizacion.avisoSinConexion = false;
+    Storage.set(LS_KEYS.migradoD1, true);
+    if (migrar) {
+      await sincronizarPendientes();
+      if (sincronizacion.pendientes.size === 0) {
+        showToast('Tus datos locales se guardaron en la base de datos.', 'success');
+      }
+    }
+    renderCurrentView();
+  } catch (error) {
+    if (error.status === 401) return manejarSesionExpirada();
+    console.error('Error cargando datos desde D1', error);
+    showToast('No se pudieron cargar los datos desde la base de datos. Se muestran los guardados en este dispositivo.', 'error');
+  } finally {
+    sincronizacion.cargando = false;
+  }
+}
+
+function manejarSesionExpirada() {
+  sesionWorkerValida = false;
+  sincronizacion.listo = false;
+  guardarTokenApi(null);
+  showToast('Tu sesión expiró. Inicia sesión de nuevo para guardar los cambios.', 'error');
+  mostrarApp();
+}
+
+// Envía lo pendiente si el usuario cierra o recarga la pestaña.
+window.addEventListener('pagehide', () => sincronizarPendientes({ keepalive: true }));
 
 /* --------------------------------------------------------------------------
    5. UTILIDADES GENERALES
@@ -1867,13 +2159,13 @@ let sesionWorkerValida = false;
 async function leerRespuestaJSON(respuesta) {
   const texto = await respuesta.text();
   if (!texto) return {};
-  try { return JSON.parse(texto); } catch { return {}; }
+  try { return JSON.parse(texto) ?? {}; } catch { return {}; }
 }
 
 async function comprobarSesionWorker() {
-  const respuesta = await fetch(`${API_BASE_URL}/api/auth/session`, { credentials: 'include' });
-  const datos = await leerRespuestaJSON(respuesta);
-  sesionWorkerValida = respuesta.ok && datos.autenticado === true;
+  const datos = await apiFetch('/auth/session');
+  sesionWorkerValida = datos.autenticado === true;
+  if (!sesionWorkerValida) guardarTokenApi(null);
   return sesionWorkerValida;
 }
 
@@ -1920,6 +2212,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     if (!respuesta.ok) {
       throw new Error(datos.error || 'Usuario o contraseña incorrectos.');
     }
+    guardarTokenApi(datos.token);
     if (!(await comprobarSesionWorker())) {
       throw new Error('No se pudo confirmar la sesión.');
     }
@@ -1935,12 +2228,14 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
 document.getElementById('btn-logout').addEventListener('click', async () => {
   try {
-    await fetch(`${API_BASE_URL}/api/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    });
+    await sincronizarPendientes();
+    await apiFetch('/auth/logout', { method: 'POST' });
+  } catch (error) {
+    console.error('Error cerrando sesión en el Worker', error);
   } finally {
+    guardarTokenApi(null);
     sesionWorkerValida = false;
+    sincronizacion.listo = false;
     document.getElementById('app').classList.add('hidden');
     document.getElementById('login-form').reset();
     limpiarErrorLogin();
@@ -1966,6 +2261,7 @@ function mostrarApp() {
   document.getElementById('public-app').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   goToView('dashboard');
+  cargarDatosRemotos();
 }
 
 /* --------------------------------------------------------------------------
@@ -1995,7 +2291,7 @@ document.getElementById('public-back-btn').addEventListener('click', () => {
 
 function mostrarPublicApp() {
   document.getElementById('public-app').classList.remove('hidden');
-  renderPublicProducts();
+  cargarProductosPublicos();
   renderSpaServicios();
   poblarSpaTipoSelect();
   activarPublicTab('productos');
@@ -2020,8 +2316,19 @@ document.querySelectorAll('.tab-btn-pub').forEach(btn => {
    cargado por loadState(). Solo se muestran productos activos y no
    se inventa ningún dato: si falta información, se refleja tal cual
    está en el registro del producto. */
+async function cargarProductosPublicos() {
+  renderPublicProducts();
+  try {
+    const filas = await apiFetch('/public/products');
+    state.productosPublicos = Array.isArray(filas) ? filas.map(MAPEO_D1.productos.desdeDb) : null;
+  } catch (error) {
+    console.error('Error cargando el catálogo público', error);
+  }
+  renderPublicProducts();
+}
+
 function renderPublicProducts() {
-  const activos = state.productos.filter(p => p.activo);
+  const activos = (state.productosPublicos || state.productos).filter(p => p.activo);
   const cont = document.getElementById('public-products-grid');
   cont.innerHTML = activos.length
     ? activos.map(productMiniCardHTML).join('')
@@ -2123,13 +2430,8 @@ document.getElementById('btn-reservar-spa').addEventListener('click', async () =
 
   let reserva;
   try {
-    const respuesta = await fetch(`${API_BASE_URL}/api/spa-reservations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(datosReserva),
-    });
-    const datos = await leerRespuestaJSON(respuesta);
-    if (!respuesta.ok || !datos.id || !datos.codigo) {
+    const datos = await apiFetch('/spa-reservations', { method: 'POST', body: datosReserva });
+    if (!datos.id || !datos.codigo) {
       throw new Error(datos.error || 'No se pudo registrar la reserva.');
     }
     reserva = {
@@ -2200,13 +2502,11 @@ function normalizarReservaSpa(reserva) {
 
 async function cargarReservasSpa() {
   try {
-    const respuesta = await fetch(`${API_BASE_URL}/api/spa-reservations`, { credentials: 'include' });
-    const datos = await leerRespuestaJSON(respuesta);
-    if (!respuesta.ok || !Array.isArray(datos)) {
-      throw new Error(datos.error || 'No se pudieron cargar las reservas.');
-    }
+    const datos = await apiFetch('/spa-reservations');
+    if (!Array.isArray(datos)) throw new Error('No se pudieron cargar las reservas.');
     state.spaReservas = datos.map(normalizarReservaSpa);
   } catch (error) {
+    if (error.status === 401) return manejarSesionExpirada();
     state.spaReservas = [];
     showToast(error.message || 'No se pudieron cargar las reservas.', 'error');
   }
@@ -2252,14 +2552,7 @@ function renderSpaReservas() {
         const r = state.spaReservas.find(x => x.id === select.dataset.spaEstado);
         const estadoAnterior = r.estado;
         try {
-          const respuesta = await fetch(`${API_BASE_URL}/api/spa-reservations/${r.id}`, {
-            method: 'PATCH',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ estado: select.value }),
-          });
-          const datos = await leerRespuestaJSON(respuesta);
-          if (!respuesta.ok) throw new Error(datos.error || 'No se pudo actualizar la reserva.');
+          await apiFetch(`/spa-reservations/${encodeURIComponent(r.id)}`, { method: 'PATCH', body: { estado: select.value } });
           r.estado = select.value;
           showToast(`Reserva marcada como ${r.estado}.`, 'success');
           renderSpaReservas();
@@ -2334,15 +2627,9 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
     preferencia: document.getElementById('a-preferencia').value,
   };
 
-  let respuesta;
   try {
-    respuesta = await fetch(`${API_BASE_URL}/api/consultation-requests`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(solicitud),
-    });
-    const datos = await leerRespuestaJSON(respuesta);
-    if (!respuesta.ok || !datos.codigo) {
+    const datos = await apiFetch('/consultation-requests', { method: 'POST', body: solicitud });
+    if (!datos.codigo) {
       throw new Error(datos.error || 'No se pudo registrar la solicitud.');
     }
     solicitud.id = datos.id;
@@ -2396,13 +2683,11 @@ function normalizarSolicitud(solicitud) {
 
 async function cargarSolicitudes() {
   try {
-    const respuesta = await fetch(`${API_BASE_URL}/api/consultation-requests`, { credentials: 'include' });
-    const datos = await leerRespuestaJSON(respuesta);
-    if (!respuesta.ok || !Array.isArray(datos)) {
-      throw new Error(datos.error || 'No se pudieron cargar las solicitudes.');
-    }
+    const datos = await apiFetch('/consultation-requests');
+    if (!Array.isArray(datos)) throw new Error('No se pudieron cargar las solicitudes.');
     state.solicitudes = datos.map(normalizarSolicitud);
   } catch (error) {
+    if (error.status === 401) return manejarSesionExpirada();
     state.solicitudes = [];
     showToast(error.message || 'No se pudieron cargar las solicitudes.', 'error');
   }
@@ -2417,7 +2702,7 @@ function renderSolicitudes() {
       s.codigo.toLowerCase().includes(busqueda) ||
       s.nombre.toLowerCase().includes(busqueda) ||
       (s.ciudad || '').toLowerCase().includes(busqueda))
-    .sort((a, b) => b.fecha.localeCompare(a.fecha));
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
 
   const tbody = document.getElementById('tabla-solicitudes-body');
   const empty = document.getElementById('solicitudes-empty');
@@ -2447,14 +2732,7 @@ function renderSolicitudes() {
         const estadoAnterior = s.estado;
         const nuevoEstado = s.estado === 'atendida' ? 'pendiente' : 'atendida';
         try {
-          const respuesta = await fetch(`${API_BASE_URL}/api/consultation-requests/${s.id}`, {
-            method: 'PATCH',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ estado: nuevoEstado }),
-          });
-          const datos = await leerRespuestaJSON(respuesta);
-          if (!respuesta.ok) throw new Error(datos.error || 'No se pudo actualizar la solicitud.');
+          await apiFetch(`/consultation-requests/${encodeURIComponent(s.id)}`, { method: 'PATCH', body: { estado: nuevoEstado } });
           s.estado = nuevoEstado;
           renderSolicitudes();
           showToast(`Solicitud marcada como ${s.estado === 'atendida' ? 'atendida' : 'pendiente'}.`, 'success');

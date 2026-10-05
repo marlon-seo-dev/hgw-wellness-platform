@@ -56,9 +56,10 @@ function extractCookie(response) {
   return match ? match[1] : null;
 }
 
-async function call(method, path, { body, cookie } = {}) {
+async function call(method, path, { body, cookie, bearer } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (cookie) headers['Cookie'] = `hgw_session_token=${cookie}`;
+  if (bearer) headers['Authorization'] = `Bearer ${bearer}`;
   const request = new Request(`http://localhost/api${path}`, {
     method, headers, body: body ? JSON.stringify(body) : undefined,
   });
@@ -174,6 +175,21 @@ async function main() {
   r = await call('POST', '/spa-reservations', { body: { tipo_id: 'masaje-reductor', tipo_nombre: 'Masaje reductor', fecha: '2026-02-01', hora: '10:00', nombre: 'Cliente SPA', telefono: '3003334444' } });
   log('Worker: reserva SPA pública -> 201 con código SPA-KR-XXXXX', r.status === 201 && /^SPA-KR-[A-Z0-9]{5}$/.test(r.data.codigo || ''), JSON.stringify(r.data));
   const reservaId = r.data.id;
+  r = await call('GET', '/spa-reservations', { cookie });
+  log('Worker: la reserva SPA conserva la fecha de la cita (no la de hoy)', r.data.find(x => x.id === reservaId)?.fecha === '2026-02-01');
+
+  // 10b) Token Bearer (sin cookie): navegadores que bloquean cookies de terceros
+  r = await call('POST', '/auth/login', { body: { usuario: USUARIO, password: PASSWORD } });
+  const bearer = r.data.token;
+  log('Worker: login devuelve token para Authorization: Bearer', /^[a-f0-9]{64}$/.test(bearer || ''));
+  r = await call('GET', '/clients', { bearer });
+  log('Worker: /api/clients con Bearer (sin cookie) -> 200', r.status === 200);
+
+  // 10c) Catálogo público: solo productos activos, sin sesión
+  await call('POST', '/products', { cookie, body: { id: 'prod_act', nombre: 'Activo', activo: 1, objetivos_compatibles_json: '[]', demo: 0 } });
+  await call('POST', '/products', { cookie, body: { id: 'prod_inact', nombre: 'Inactivo', activo: 0, objetivos_compatibles_json: '[]', demo: 0 } });
+  r = await call('GET', '/public/products');
+  log('Worker: catálogo público sin sesión solo muestra productos activos', r.status === 200 && r.data.some(p => p.id === 'prod_act') && !r.data.some(p => p.id === 'prod_inact'));
   r = await call('PATCH', `/spa-reservations/${reservaId}`, { cookie, body: { estado: 'confirmada' } });
   log('Worker: cambiar estado de reserva SPA -> 200', r.status === 200);
   r = await call('GET', '/spa-reservations', { cookie });

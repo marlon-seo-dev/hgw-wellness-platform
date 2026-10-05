@@ -6,11 +6,9 @@
    mismo si un usuario está autenticado: eso lo valida este archivo en cada
    solicitud, contra la tabla `sessions` en D1 — no contra localStorage.
 
-   Estado de esta entrega: arquitectura preparada y funcional, pero el
-   frontend actual (index.html/script.js) TODAVÍA NO llama a estos
-   endpoints — sigue funcionando 100% con localStorage, tal como se pidió
-   explícitamente ("no migrar todo de golpe"). Este Worker queda listo para
-   conectarse módulo por módulo en la siguiente fase.
+   Estado: el frontend (script.js) usa estos endpoints como fuente de
+   verdad para clientes, productos, seguimientos, planes, solicitudes de
+   asesoría y reservas SPA. localStorage queda solo como caché local.
 
    Organización de este archivo:
      1. CORS
@@ -42,7 +40,8 @@ function corsHeaders(request, env) {
     'Access-Control-Allow-Origin': origenValido ? origin : (permitido[0] || ''),
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
   };
 }
 
@@ -113,9 +112,13 @@ function generarCodigo(prefijo) {
 
 /* --------------------------------------------------------------------------
    4. SESIONES
-   Cookie HttpOnly + Secure + SameSite=Lax. El token NUNCA es accesible
-   desde JavaScript del frontend (por diseño: HttpOnly), a diferencia de
-   hgw_session en localStorage, que cualquier script podía leer o falsear.
+   El frontend (*.pages.dev) y el Worker (*.workers.dev) viven en dominios
+   distintos, así que para el navegador la cookie de sesión es "de
+   terceros": necesita SameSite=None + Secure, y aun así Safari, Firefox y
+   Chrome con bloqueo de cookies de terceros la descartan. Por eso el token
+   se acepta por dos vías, ambas validadas contra la tabla `sessions`:
+     - Cookie HttpOnly hgw_session_token (cuando el navegador la permite).
+     - Encabezado Authorization: Bearer <token> (funciona siempre).
    -------------------------------------------------------------------------- */
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 12; // 12 horas
 
@@ -126,17 +129,24 @@ function getCookie(request, name) {
 }
 
 function cookieFlags(env) {
-  // 'Secure' requiere HTTPS. En desarrollo local (wrangler dev por HTTP)
-  // se omite mediante env.ENVIRONMENT = 'development' (ver wrangler.toml).
-  return env.ENVIRONMENT === 'development' ? '' : ' Secure;';
+  // SameSite=None exige 'Secure' (HTTPS). En desarrollo local (wrangler dev
+  // por HTTP) el navegador rechazaría SameSite=None sin Secure, así que ahí
+  // se usa SameSite=Lax (env.ENVIRONMENT = 'development', ver wrangler.toml).
+  return env.ENVIRONMENT === 'development' ? ' SameSite=Lax;' : ' Secure; SameSite=None;';
 }
 
 function sessionCookieHeader(token, expiresAt, env) {
-  return `hgw_session_token=${token}; HttpOnly;${cookieFlags(env)} SameSite=Lax; Path=/; Expires=${expiresAt.toUTCString()}`;
+  return `hgw_session_token=${token}; HttpOnly;${cookieFlags(env)} Path=/; Expires=${expiresAt.toUTCString()}`;
 }
 
 function clearCookieHeader(env) {
-  return `hgw_session_token=; HttpOnly;${cookieFlags(env)} SameSite=Lax; Path=/; Max-Age=0`;
+  return `hgw_session_token=; HttpOnly;${cookieFlags(env)} Path=/; Max-Age=0`;
+}
+
+function getSessionToken(request) {
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.match(/^Bearer\s+([a-f0-9]{64})$/i);
+  return bearer ? bearer[1] : getCookie(request, 'hgw_session_token');
 }
 
 async function createSession(env, userId, request) {
@@ -153,7 +163,7 @@ async function createSession(env, userId, request) {
 // endpoint protegido. Si no hay sesión válida en D1, se bloquea aquí —
 // el frontend no participa en esta decisión.
 async function getSessionUser(request, env) {
-  const token = getCookie(request, 'hgw_session_token');
+  const token = getSessionToken(request);
   if (!token) return null;
 
   const row = await env.DB.prepare(
@@ -171,7 +181,7 @@ async function getSessionUser(request, env) {
 }
 
 async function destroySession(request, env) {
-  const token = getCookie(request, 'hgw_session_token');
+  const token = getSessionToken(request);
   if (token) await env.DB.prepare(`DELETE FROM sessions WHERE id = ?`).bind(token).run();
 }
 
@@ -270,7 +280,7 @@ async function handleLogin(request, env) {
 
   const { token, expiresAt } = await createSession(env, fila.id, request);
   return json(
-    { usuario: fila.username, marca: fila.brand_name },
+    { usuario: fila.username, marca: fila.brand_name, token, expiraEn: expiresAt.toISOString() },
     200,
     { 'Set-Cookie': sessionCookieHeader(token, expiresAt, env) }
   );
@@ -383,6 +393,18 @@ async function resolveTenantUserId(env) {
   return fila ? fila.id : null;
 }
 
+// Catálogo público (acceso sin login): solo productos activos del negocio.
+async function handleProductosPublicos(env) {
+  const userId = await resolveTenantUserId(env);
+  if (!userId) return json([], 200);
+  const { results } = await env.DB.prepare(
+    `SELECT id, nombre, categoria, descripcion, imagen, ingredientes, modo_de_uso, advertencias,
+            objetivos_compatibles_json, activo
+     FROM products WHERE user_id = ? AND activo = 1 ORDER BY created_at ASC`
+  ).bind(userId).all();
+  return json(results, 200);
+}
+
 async function handlePublicoYPrivado(request, env, tabla, prefijoCodigo, camposPublicos, id) {
   if (request.method === 'POST') {
     const userId = await resolveTenantUserId(env);
@@ -391,8 +413,12 @@ async function handlePublicoYPrivado(request, env, tabla, prefijoCodigo, camposP
     const body = await request.json().catch(() => ({}));
     const id2 = uuid();
     const codigo = generarCodigo(prefijoCodigo);
-    const columnas = ['id', 'user_id', 'codigo', ...camposPublicos, 'fecha', 'estado', 'created_at'];
-    const valores = [id2, userId, codigo, ...camposPublicos.map(c => body[c] ?? null), nowISO().slice(0, 10), 'pendiente', nowISO()];
+    const columnas = ['id', 'user_id', 'codigo', ...camposPublicos, 'estado', 'created_at'];
+    const valores = [id2, userId, codigo, ...camposPublicos.map(c => body[c] ?? null), 'pendiente', nowISO()];
+    // Las solicitudes de asesoría guardan la fecha de registro; las reservas
+    // SPA ya traen 'fecha' (la de la cita) en camposPublicos. Antes se
+    // agregaba 'fecha' dos veces y la cita quedaba guardada con la de hoy.
+    if (!camposPublicos.includes('fecha')) { columnas.push('fecha'); valores.push(nowISO().slice(0, 10)); }
     await env.DB.prepare(`INSERT INTO ${tabla} (${columnas.join(', ')}) VALUES (${columnas.map(() => '?').join(', ')})`)
       .bind(...valores).run();
     return json({ id: id2, codigo }, 201);
@@ -441,6 +467,10 @@ export default {
         respuesta = await handleLogout(request, env);
       } else if (recurso === 'auth' && idParam === 'session' && request.method === 'GET') {
         respuesta = await handleSessionCheck(request, env);
+
+      // --- Catálogo público de productos (sin sesión, solo lectura) ---
+      } else if (recurso === 'public' && idParam === 'products' && request.method === 'GET') {
+        respuesta = await handleProductosPublicos(env);
 
       // --- Recursos privados genéricos (clientes, productos, seguimientos) ---
       } else if (['clients', 'products', 'follow-ups'].includes(recurso)) {
