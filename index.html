@@ -593,7 +593,7 @@
                   <th>Contacto</th>
                   <th>Ciudad</th>
                   <th>Motivo</th>
-                  <th>Fecha</th>
+                  <th>Cita</th>
                   <th>Estado</th>
                   <th></th>
                 </tr>
@@ -685,8 +685,13 @@
               <div class="field"><label for="a-nombre">Nombre completo *</label><input type="text" id="a-nombre" required></div>
               <div class="field"><label for="a-telefono">Teléfono / WhatsApp *</label><input type="tel" id="a-telefono" required></div>
               <div class="field"><label for="a-correo">Correo electrónico</label><input type="email" id="a-correo"></div>
-              <div class="field"><label for="a-negocio">Nombre del negocio o local</label><input type="text" id="a-negocio"></div>
               <div class="field"><label for="a-ciudad">Ciudad *</label><input type="text" id="a-ciudad" required></div>
+              <div class="field"><label for="a-fecha">Fecha de la asesoría *</label><input type="date" id="a-fecha" required></div>
+              <div class="field">
+                <label for="a-hora">Hora *</label>
+                <select id="a-hora" required disabled><option value="">Elige primero una fecha</option></select>
+                <span class="field-hint" id="a-hora-hint" aria-live="polite"></span>
+              </div>
               <div class="field">
                 <label for="a-preferencia">Preferencia de contacto</label>
                 <select id="a-preferencia">
@@ -739,7 +744,11 @@
                 <select id="spa-tipo" required></select>
               </div>
               <div class="field"><label for="spa-fecha">Fecha *</label><input type="date" id="spa-fecha" required></div>
-              <div class="field"><label for="spa-hora">Hora *</label><input type="time" id="spa-hora" min="08:00" max="18:00" required></div>
+              <div class="field">
+                <label for="spa-hora">Hora *</label>
+                <select id="spa-hora" required disabled><option value="">Elige primero una fecha</option></select>
+                <span class="field-hint" id="spa-hora-hint" aria-live="polite"></span>
+              </div>
               <div class="field"><label for="spa-nombre">Nombre completo *</label><input type="text" id="spa-nombre" required></div>
               <div class="field"><label for="spa-telefono">Teléfono *</label><input type="tel" id="spa-telefono" required></div>
               <div class="field"><label for="spa-correo">Correo electrónico</label><input type="email" id="spa-correo"></div>

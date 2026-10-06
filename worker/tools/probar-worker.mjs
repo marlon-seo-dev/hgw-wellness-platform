@@ -164,21 +164,53 @@ async function main() {
   r = await call('GET', '/weekly-plans', { cookie });
   log('Worker: solo hay 1 plan semanal vigente para ese cliente (no se duplicó)', r.data.filter(p => p.client_id === clienteId).length === 1, `Encontrados: ${r.data.length}`);
 
+  // Fecha futura para las citas (las fechas pasadas se rechazan)
+  const FECHA_CITA = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   // 8) Solicitud de asesoría PÚBLICA (sin cookie) genera código único
-  r = await call('POST', '/consultation-requests', { body: { nombre: 'Visitante Público', telefono: '3001112222', ciudad: 'Bogotá', motivo: 'Quiero información' } });
+  r = await call('POST', '/consultation-requests', { body: { nombre: 'Visitante Público', telefono: '3001112222', ciudad: 'Bogotá', motivo: 'Quiero información', fecha_cita: FECHA_CITA, hora_cita: '08:00' } });
   log('Worker: solicitud pública sin sesión -> 201', r.status === 201, JSON.stringify(r.data));
   log('Worker: código de solicitud con formato HGW-XXXXX', /^HGW-[A-Z0-9]{5}$/.test(r.data.codigo || ''), r.data.codigo);
 
   // 9) Esa solicitud debe verse en el panel privado del emprendedor
   r = await call('GET', '/consultation-requests', { cookie });
   log('Worker: la solicitud pública aparece en el panel privado', r.data.some(s => s.nombre === 'Visitante Público'));
+  log('Worker: la solicitud guarda fecha y hora de la cita', r.data.some(s => s.fecha_cita === FECHA_CITA && s.hora_cita === '08:00'));
+
+  // 9b) Agenda de asesorías: no se permite doble reserva
+  r = await call('POST', '/consultation-requests', { body: { nombre: 'Otro Visitante', telefono: '3005550000', ciudad: 'Cali', motivo: 'Quiero información', fecha_cita: FECHA_CITA, hora_cita: '08:00' } });
+  log('AGENDA: asesoría en horario ya ocupado -> 409', r.status === 409 && r.data.codigoError === 'HORARIO_OCUPADO', JSON.stringify(r.data));
+  r = await call('GET', `/availability?servicio=asesoria&fecha=${FECHA_CITA}`);
+  log('AGENDA: disponibilidad pública marca 08:00 como ocupado', r.status === 200 && r.data.ocupados.includes('08:00') && r.data.ocupados.length === 1, JSON.stringify(r.data));
+  r = await call('POST', '/consultation-requests', { body: { nombre: 'Otro Visitante', telefono: '3005550000', ciudad: 'Cali', motivo: 'Quiero información', fecha_cita: FECHA_CITA, hora_cita: '09:00' } });
+  log('AGENDA: asesoría en otro horario libre -> 201', r.status === 201);
+  r = await call('POST', '/consultation-requests', { body: { nombre: 'Sin cita', telefono: '3005550000', ciudad: 'Cali', motivo: 'Quiero información' } });
+  log('AGENDA: asesoría sin fecha/hora -> 400', r.status === 400);
+  r = await call('POST', '/consultation-requests', { body: { nombre: 'Pasado', telefono: '3005550000', fecha_cita: '2020-01-01', hora_cita: '10:00' } });
+  log('AGENDA: asesoría en fecha pasada -> 400', r.status === 400);
+  r = await call('POST', '/consultation-requests', { body: { nombre: 'Fuera', telefono: '3005550000', fecha_cita: FECHA_CITA, hora_cita: '20:00' } });
+  log('AGENDA: asesoría fuera del horario de atención -> 400', r.status === 400);
 
   // 10) Reserva SPA pública + cambio de estado desde el panel privado
-  r = await call('POST', '/spa-reservations', { body: { tipo_id: 'masaje-reductor', tipo_nombre: 'Masaje reductor', fecha: '2026-02-01', hora: '10:00', nombre: 'Cliente SPA', telefono: '3003334444' } });
+  r = await call('POST', '/spa-reservations', { body: { tipo_id: 'masaje-reductor', tipo_nombre: 'Masaje reductor', fecha: FECHA_CITA, hora: '08:00', nombre: 'Cliente SPA', telefono: '3003334444' } });
   log('Worker: reserva SPA pública -> 201 con código SPA-KR-XXXXX', r.status === 201 && /^SPA-KR-[A-Z0-9]{5}$/.test(r.data.codigo || ''), JSON.stringify(r.data));
+  log('AGENDA: SPA y asesorías son agendas independientes (08:00 libre en SPA)', r.status === 201);
   const reservaId = r.data.id;
   r = await call('GET', '/spa-reservations', { cookie });
-  log('Worker: la reserva SPA conserva la fecha de la cita (no la de hoy)', r.data.find(x => x.id === reservaId)?.fecha === '2026-02-01');
+  log('Worker: la reserva SPA conserva la fecha de la cita (no la de hoy)', r.data.find(x => x.id === reservaId)?.fecha === FECHA_CITA);
+
+  // 10a) Agenda SPA: doble reserva, cancelación libera, reactivación con choque
+  r = await call('POST', '/spa-reservations', { body: { tipo_id: 'sueroterapia', tipo_nombre: 'Sueroterapia', fecha: FECHA_CITA, hora: '08:00', nombre: 'Segundo SPA', telefono: '3003335555' } });
+  log('AGENDA: reserva SPA en horario ya ocupado -> 409', r.status === 409);
+  r = await call('PATCH', `/spa-reservations/${reservaId}`, { cookie, body: { estado: 'cancelada' } });
+  r = await call('POST', '/spa-reservations', { body: { tipo_id: 'sueroterapia', tipo_nombre: 'Sueroterapia', fecha: FECHA_CITA, hora: '08:00', nombre: 'Segundo SPA', telefono: '3003335555' } });
+  log('AGENDA: una reserva cancelada libera el horario -> 201', r.status === 201);
+  r = await call('PATCH', `/spa-reservations/${reservaId}`, { cookie, body: { estado: 'pendiente' } });
+  log('AGENDA: reactivar la cancelada sobre un horario ya tomado -> 409', r.status === 409);
+  r = await call('GET', `/availability?servicio=spa&fecha=${FECHA_CITA}`);
+  log('AGENDA: disponibilidad SPA no expone datos personales', r.status === 200 && Object.keys(r.data).sort().join() === 'fecha,horarios,ocupados');
+  r = await call('GET', `/availability?servicio=otro&fecha=${FECHA_CITA}`);
+  log('AGENDA: disponibilidad con servicio inválido -> 400', r.status === 400);
 
   // 10b) Token Bearer (sin cookie): navegadores que bloquean cookies de terceros
   r = await call('POST', '/auth/login', { body: { usuario: USUARIO, password: PASSWORD } });
@@ -192,10 +224,12 @@ async function main() {
   await call('POST', '/products', { cookie, body: { id: 'prod_inact', nombre: 'Inactivo', activo: 0, objetivos_compatibles_json: '[]', demo: 0 } });
   r = await call('GET', '/public/products');
   log('Worker: catálogo público sin sesión solo muestra productos activos', r.status === 200 && r.data.some(p => p.id === 'prod_act') && !r.data.some(p => p.id === 'prod_inact'));
-  r = await call('PATCH', `/spa-reservations/${reservaId}`, { cookie, body: { estado: 'confirmada' } });
+  r = await call('POST', '/spa-reservations', { body: { tipo_id: 'masaje-relajante', tipo_nombre: 'Masaje relajante', fecha: FECHA_CITA, hora: '10:00', nombre: 'Tercer SPA', telefono: '3003336666' } });
+  const reservaConfirmarId = r.data.id;
+  r = await call('PATCH', `/spa-reservations/${reservaConfirmarId}`, { cookie, body: { estado: 'confirmada' } });
   log('Worker: cambiar estado de reserva SPA -> 200', r.status === 200);
   r = await call('GET', '/spa-reservations', { cookie });
-  log('Worker: el nuevo estado quedó guardado', r.data.find(x => x.id === reservaId)?.estado === 'confirmada');
+  log('Worker: el nuevo estado quedó guardado', r.data.find(x => x.id === reservaConfirmarId)?.estado === 'confirmada');
 
   // 11) Logout invalida la sesión de verdad (no solo en el navegador)
   r = await call('POST', '/auth/logout', { cookie });

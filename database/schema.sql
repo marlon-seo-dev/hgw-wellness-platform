@@ -171,15 +171,18 @@ CREATE TABLE IF NOT EXISTS consultation_requests (
   nombre       TEXT NOT NULL,
   telefono     TEXT NOT NULL,
   correo       TEXT,
-  negocio      TEXT,
+  negocio      TEXT,                   -- ya no se pide en el formulario; se conserva por registros antiguos
   ciudad       TEXT,
   motivo       TEXT,
   preferencia  TEXT,
-  fecha        TEXT NOT NULL,
+  fecha        TEXT NOT NULL,          -- fecha de registro de la solicitud
+  fecha_cita   TEXT,                   -- fecha agendada (YYYY-MM-DD) — migración 0001
+  hora_cita    TEXT,                   -- hora agendada (HH:MM)       — migración 0001
   estado       TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','atendida')),
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_consultreq_user ON consultation_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_consultreq_agenda ON consultation_requests(user_id, fecha_cita, hora_cita);
 
 -- ----------------------------------------------------------------------------
 -- SPA_RESERVATIONS — equivalente a state.spaReservas / hgw_spa_reservas
@@ -203,6 +206,7 @@ CREATE TABLE IF NOT EXISTS spa_reservations (
 );
 CREATE INDEX IF NOT EXISTS idx_sparesv_user  ON spa_reservations(user_id);
 CREATE INDEX IF NOT EXISTS idx_sparesv_fecha ON spa_reservations(fecha);
+CREATE INDEX IF NOT EXISTS idx_sparesv_agenda ON spa_reservations(user_id, fecha, hora);
 
 -- ============================================================================
 -- NOTA IMPORTANTE SOBRE DATOS INICIALES

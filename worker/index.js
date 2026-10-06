@@ -405,22 +405,102 @@ async function handleProductosPublicos(env) {
   return json(results, 200);
 }
 
-async function handlePublicoYPrivado(request, env, tabla, prefijoCodigo, camposPublicos, id) {
+/* --------------------------------------------------------------------------
+   AGENDA — disponibilidad por fecha y hora
+   Asesorías y SPA llevan agendas independientes (son servicios distintos).
+   Una franja queda ocupada por cualquier cita que no esté cancelada.
+   -------------------------------------------------------------------------- */
+const HORARIOS_AGENDA = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+const MENSAJE_HORARIO_OCUPADO = 'Ese horario ya está ocupado. Por favor elige otra fecha u hora.';
+
+const AGENDAS = {
+  asesoria: { tabla: 'consultation_requests', colFecha: 'fecha_cita', colHora: 'hora_cita' },
+  spa: { tabla: 'spa_reservations', colFecha: 'fecha', colHora: 'hora' },
+};
+
+const SERVICIOS_PUBLICOS = {
+  'consultation-requests': {
+    tabla: 'consultation_requests', prefijo: 'HGW', agenda: AGENDAS.asesoria,
+    campos: ['nombre', 'telefono', 'correo', 'ciudad', 'motivo', 'preferencia', 'fecha_cita', 'hora_cita'],
+  },
+  'spa-reservations': {
+    tabla: 'spa_reservations', prefijo: 'SPA-KR', agenda: AGENDAS.spa,
+    campos: ['tipo_id', 'tipo_nombre', 'fecha', 'hora', 'nombre', 'telefono', 'correo', 'observaciones'],
+  },
+};
+
+const FILTRO_OCUPADO = `estado <> 'cancelada'`;
+
+async function horariosOcupados(env, userId, agenda, fecha) {
+  const { results } = await env.DB.prepare(
+    `SELECT ${agenda.colHora} AS hora FROM ${agenda.tabla}
+     WHERE user_id = ? AND ${agenda.colFecha} = ? AND ${FILTRO_OCUPADO}`
+  ).bind(userId, fecha).all();
+  return [...new Set(results.map(r => r.hora).filter(Boolean))].sort();
+}
+
+function validarFechaHora(fecha, hora) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha || '') || Number.isNaN(Date.parse(fecha))) {
+    return 'La fecha de la cita no es válida.';
+  }
+  // Margen de un día: el Worker corre en UTC y el negocio en hora de Colombia.
+  const ayer = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (fecha < ayer) return 'La fecha de la cita no puede ser anterior a hoy.';
+  if (!HORARIOS_AGENDA.includes(hora)) return 'Selecciona un horario válido entre 8:00 a. m. y 5:00 p. m.';
+  return null;
+}
+
+// GET /api/availability?servicio=asesoria|spa&fecha=YYYY-MM-DD (público).
+// Solo devuelve las horas ocupadas, nunca datos de otros clientes.
+async function handleDisponibilidad(request, env) {
+  const url = new URL(request.url);
+  const agenda = AGENDAS[url.searchParams.get('servicio')];
+  const fecha = url.searchParams.get('fecha') || '';
+  if (!agenda) return json({ error: 'Servicio no válido.' }, 400);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return json({ error: 'Fecha no válida.' }, 400);
+  const userId = await resolveTenantUserId(env);
+  const ocupados = userId ? await horariosOcupados(env, userId, agenda, fecha) : [];
+  return json({ fecha, horarios: HORARIOS_AGENDA, ocupados }, 200);
+}
+
+async function handlePublicoYPrivado(request, env, servicio, id) {
+  const { tabla, prefijo, campos, agenda } = servicio;
+
   if (request.method === 'POST') {
     const userId = await resolveTenantUserId(env);
     if (!userId) return json({ error: 'Negocio no configurado todavía.' }, 503);
 
     const body = await request.json().catch(() => ({}));
+    if (!String(body.nombre || '').trim() || !String(body.telefono || '').trim()) {
+      return json({ error: 'Nombre y teléfono son obligatorios.' }, 400);
+    }
+    const fechaCita = body[agenda.colFecha];
+    const horaCita = body[agenda.colHora];
+    const errorFecha = validarFechaHora(fechaCita, horaCita);
+    if (errorFecha) return json({ error: errorFecha }, 400);
+
     const id2 = uuid();
-    const codigo = generarCodigo(prefijoCodigo);
-    const columnas = ['id', 'user_id', 'codigo', ...camposPublicos, 'estado', 'created_at'];
-    const valores = [id2, userId, codigo, ...camposPublicos.map(c => body[c] ?? null), 'pendiente', nowISO()];
-    // Las solicitudes de asesoría guardan la fecha de registro; las reservas
-    // SPA ya traen 'fecha' (la de la cita) en camposPublicos. Antes se
-    // agregaba 'fecha' dos veces y la cita quedaba guardada con la de hoy.
-    if (!camposPublicos.includes('fecha')) { columnas.push('fecha'); valores.push(nowISO().slice(0, 10)); }
-    await env.DB.prepare(`INSERT INTO ${tabla} (${columnas.join(', ')}) VALUES (${columnas.map(() => '?').join(', ')})`)
-      .bind(...valores).run();
+    const codigo = generarCodigo(prefijo);
+    const columnas = ['id', 'user_id', 'codigo', ...campos, 'estado', 'created_at'];
+    const valores = [id2, userId, codigo, ...campos.map(c => body[c] ?? null), 'pendiente', nowISO()];
+    // Las solicitudes de asesoría guardan además la fecha de registro; las
+    // reservas SPA ya traen 'fecha' (la de la cita) en sus campos.
+    if (!campos.includes('fecha')) { columnas.push('fecha'); valores.push(nowISO().slice(0, 10)); }
+
+    // Inserción atómica: solo se escribe si la franja sigue libre. Así dos
+    // personas que envían a la vez no pueden quedarse con el mismo horario.
+    const res = await env.DB.prepare(
+      `INSERT INTO ${tabla} (${columnas.join(', ')})
+       SELECT ${columnas.map(() => '?').join(', ')}
+       WHERE NOT EXISTS (
+         SELECT 1 FROM ${tabla}
+         WHERE user_id = ? AND ${agenda.colFecha} = ? AND ${agenda.colHora} = ? AND ${FILTRO_OCUPADO}
+       )`
+    ).bind(...valores, userId, fechaCita, horaCita).run();
+
+    if (!res.meta.changes) {
+      return json({ error: MENSAJE_HORARIO_OCUPADO, codigoError: 'HORARIO_OCUPADO' }, 409);
+    }
     return json({ id: id2, codigo }, 201);
   }
 
@@ -437,9 +517,21 @@ async function handlePublicoYPrivado(request, env, tabla, prefijoCodigo, camposP
     const user = request.__user;
     const body = await request.json().catch(() => ({}));
     if (!body.estado) return json({ error: 'estado es obligatorio.' }, 400);
-    const res = await env.DB.prepare(`UPDATE ${tabla} SET estado = ? WHERE id = ? AND user_id = ?`)
+    const actual = await env.DB.prepare(
+      `SELECT estado, ${agenda.colFecha} AS fecha_cita, ${agenda.colHora} AS hora_cita FROM ${tabla} WHERE id = ? AND user_id = ?`
+    ).bind(id, user.id).first();
+    if (!actual) return json({ error: 'No encontrado.' }, 404);
+
+    // Reactivar una cita cancelada no puede pisar otra ya agendada en esa franja.
+    if (actual.estado === 'cancelada' && body.estado !== 'cancelada' && actual.fecha_cita && actual.hora_cita) {
+      const choque = await env.DB.prepare(
+        `SELECT 1 FROM ${tabla} WHERE user_id = ? AND id <> ? AND ${agenda.colFecha} = ? AND ${agenda.colHora} = ? AND ${FILTRO_OCUPADO}`
+      ).bind(user.id, id, actual.fecha_cita, actual.hora_cita).first();
+      if (choque) return json({ error: MENSAJE_HORARIO_OCUPADO, codigoError: 'HORARIO_OCUPADO' }, 409);
+    }
+
+    await env.DB.prepare(`UPDATE ${tabla} SET estado = ? WHERE id = ? AND user_id = ?`)
       .bind(body.estado, id, user.id).run();
-    if (res.meta.changes === 0) return json({ error: 'No encontrado.' }, 404);
     return json({ ok: true }, 200);
   }
 
@@ -467,6 +559,10 @@ export default {
         respuesta = await handleLogout(request, env);
       } else if (recurso === 'auth' && idParam === 'session' && request.method === 'GET') {
         respuesta = await handleSessionCheck(request, env);
+
+      // --- Disponibilidad de agenda (sin sesión, solo horas ocupadas) ---
+      } else if (recurso === 'availability' && request.method === 'GET') {
+        respuesta = await handleDisponibilidad(request, env);
 
       // --- Catálogo público de productos (sin sesión, solo lectura) ---
       } else if (recurso === 'public' && idParam === 'products' && request.method === 'GET') {
@@ -496,11 +592,7 @@ export default {
           else { request.__user = user; }
         }
         if (!respuesta) {
-          respuesta = await handlePublicoYPrivado(
-            request, env, 'consultation_requests', 'HGW',
-            ['nombre', 'telefono', 'correo', 'negocio', 'ciudad', 'motivo', 'preferencia'],
-            idParam
-          );
+          respuesta = await handlePublicoYPrivado(request, env, SERVICIOS_PUBLICOS[recurso], idParam);
         }
 
       // --- Reservas SPA (público POST, privado GET/PATCH) ---
@@ -511,11 +603,7 @@ export default {
           else { request.__user = user; }
         }
         if (!respuesta) {
-          respuesta = await handlePublicoYPrivado(
-            request, env, 'spa_reservations', 'SPA-KR',
-            ['tipo_id', 'tipo_nombre', 'fecha', 'hora', 'nombre', 'telefono', 'correo', 'observaciones'],
-            idParam
-          );
+          respuesta = await handlePublicoYPrivado(request, env, SERVICIOS_PUBLICOS[recurso], idParam);
         }
 
       } else {

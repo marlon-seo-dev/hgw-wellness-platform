@@ -2294,6 +2294,8 @@ function mostrarPublicApp() {
   cargarProductosPublicos();
   renderSpaServicios();
   poblarSpaTipoSelect();
+  prepararAgenda('asesoria');
+  prepararAgenda('spa');
   activarPublicTab('productos');
   refreshIcons();
 }
@@ -2363,6 +2365,148 @@ function poblarSpaTipoSelect() {
   document.getElementById('spa-tipo').innerHTML = SPA_SERVICIOS.map(s => `<option value="${s.id}">${escapeHTML(s.nombre)}</option>`).join('');
 }
 
+/* --------------------------------------------------------------------------
+   21.2 AGENDA — disponibilidad por fecha y hora (asesorías y SPA)
+   Al elegir una fecha se consultan al Worker las horas ya ocupadas y se
+   deshabilitan en el selector. El Worker vuelve a validarlo al insertar
+   (de forma atómica), así que si alguien toma la franja entre la consulta y
+   el envío, la reserva se rechaza con 409 y se avisa al usuario.
+   Asesorías y SPA llevan agendas independientes.
+   -------------------------------------------------------------------------- */
+const HORARIOS_AGENDA = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+
+const AGENDA_FORMULARIOS = {
+  asesoria: { fecha: 'a-fecha', hora: 'a-hora', hint: 'a-hora-hint' },
+  spa: { fecha: 'spa-fecha', hora: 'spa-hora', hint: 'spa-hora-hint' },
+};
+const agendaEstado = {
+  asesoria: { ocupados: [], consulta: 0 },
+  spa: { ocupados: [], consulta: 0 },
+};
+
+// Fecha y hora LOCALES del visitante (todayISO() usa UTC y en Colombia, de
+// noche, ya devolvería el día siguiente).
+function hoyLocalISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function horaYaPaso(fecha, hora) {
+  if (fecha !== hoyLocalISO()) return fecha < hoyLocalISO();
+  const ahora = new Date();
+  const actual = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
+  return hora <= actual;
+}
+
+function etiquetaHora(hora) {
+  const h = parseInt(hora, 10);
+  return `${h % 12 || 12}:00 ${h < 12 ? 'a. m.' : 'p. m.'}`;
+}
+
+function renderHorarios(servicio, mensaje) {
+  const cfg = AGENDA_FORMULARIOS[servicio];
+  const fecha = document.getElementById(cfg.fecha).value;
+  const select = document.getElementById(cfg.hora);
+  const hint = document.getElementById(cfg.hint);
+  const previo = select.value;
+
+  if (!fecha) {
+    select.innerHTML = '<option value="">Elige primero una fecha</option>';
+    select.disabled = true;
+    hint.textContent = '';
+    return;
+  }
+
+  const ocupados = agendaEstado[servicio].ocupados;
+  const libres = HORARIOS_AGENDA.filter(h => !ocupados.includes(h) && !horaYaPaso(fecha, h));
+  select.innerHTML = '<option value="">Selecciona una hora</option>' + HORARIOS_AGENDA.map(h => {
+    const ocupado = ocupados.includes(h);
+    const pasado = !ocupado && horaYaPaso(fecha, h);
+    const nota = ocupado ? ' — ocupado' : pasado ? ' — no disponible' : '';
+    return `<option value="${h}"${ocupado || pasado ? ' disabled' : ''}>${etiquetaHora(h)}${nota}</option>`;
+  }).join('');
+  select.disabled = libres.length === 0;
+  select.value = libres.includes(previo) ? previo : '';
+
+  if (mensaje) hint.textContent = mensaje;
+  else if (previo && !libres.includes(previo)) hint.textContent = 'La hora que habías elegido ya está ocupada. Elige otra.';
+  else if (libres.length === 0) hint.textContent = 'No quedan horarios disponibles para esta fecha. Elige otra fecha.';
+  else hint.textContent = `${libres.length} ${libres.length === 1 ? 'horario disponible' : 'horarios disponibles'}.`;
+}
+
+async function actualizarDisponibilidad(servicio) {
+  const cfg = AGENDA_FORMULARIOS[servicio];
+  const estado = agendaEstado[servicio];
+  const fecha = document.getElementById(cfg.fecha).value;
+  const consulta = ++estado.consulta; // descarta respuestas de consultas anteriores
+
+  if (!fecha) {
+    estado.ocupados = [];
+    renderHorarios(servicio);
+    return;
+  }
+  document.getElementById(cfg.hint).textContent = 'Consultando disponibilidad…';
+  try {
+    const datos = await apiFetch(`/availability?servicio=${servicio}&fecha=${encodeURIComponent(fecha)}`);
+    if (consulta !== estado.consulta) return;
+    estado.ocupados = Array.isArray(datos.ocupados) ? datos.ocupados : [];
+    renderHorarios(servicio);
+  } catch (error) {
+    if (consulta !== estado.consulta) return;
+    console.error('Error consultando disponibilidad', error);
+    estado.ocupados = [];
+    renderHorarios(servicio, 'No se pudo consultar la disponibilidad. Se verificará al enviar.');
+  }
+}
+
+function prepararAgenda(servicio) {
+  const cfg = AGENDA_FORMULARIOS[servicio];
+  document.getElementById(cfg.fecha).min = hoyLocalISO();
+  actualizarDisponibilidad(servicio);
+}
+
+// Valida fecha y hora de la cita; devuelve false si hay algún error.
+function validarCampoAgenda(servicio) {
+  const cfg = AGENDA_FORMULARIOS[servicio];
+  const fechaEl = document.getElementById(cfg.fecha);
+  const horaEl = document.getElementById(cfg.hora);
+  let valido = true;
+  if (!fechaEl.value) {
+    marcarError(fechaEl, 'La fecha es obligatoria.');
+    return false;
+  }
+  if (fechaEl.value < hoyLocalISO()) {
+    marcarError(fechaEl, 'La fecha no puede ser anterior a hoy.');
+    valido = false;
+  }
+  if (!horaEl.value) {
+    marcarError(horaEl, 'Selecciona una hora disponible.');
+    valido = false;
+  } else if (agendaEstado[servicio].ocupados.includes(horaEl.value)) {
+    marcarError(horaEl, 'Ese horario ya está ocupado. Elige otra hora.');
+    valido = false;
+  } else if (horaYaPaso(fechaEl.value, horaEl.value)) {
+    marcarError(horaEl, 'Ese horario ya pasó. Elige otra hora.');
+    valido = false;
+  }
+  return valido;
+}
+
+// Respuesta 409 del Worker: alguien tomó la franja justo antes del envío.
+function manejarHorarioOcupado(servicio, error) {
+  const horaEl = document.getElementById(AGENDA_FORMULARIOS[servicio].hora);
+  const mensaje = error.message || 'Ese horario ya está ocupado. Elige otra fecha u hora.';
+  clearFieldErrors(horaEl.closest('form'));
+  horaEl.value = '';
+  marcarError(horaEl, mensaje);
+  showToast(mensaje, 'error');
+  actualizarDisponibilidad(servicio);
+}
+
+Object.entries(AGENDA_FORMULARIOS).forEach(([servicio, cfg]) => {
+  document.getElementById(cfg.fecha).addEventListener('change', () => actualizarDisponibilidad(servicio));
+});
+
 function validarSpaForm() {
   const form = document.getElementById('form-spa');
   clearFieldErrors(form);
@@ -2370,8 +2514,6 @@ function validarSpaForm() {
 
   const requeridos = [
     ['spa-tipo', 'Selecciona un tipo de sesión.'],
-    ['spa-fecha', 'La fecha es obligatoria.'],
-    ['spa-hora', 'La hora es obligatoria.'],
     ['spa-nombre', 'El nombre es obligatorio.'],
     ['spa-telefono', 'El teléfono es obligatorio.'],
   ];
@@ -2383,17 +2525,7 @@ function validarSpaForm() {
     }
   });
 
-  const fechaEl = document.getElementById('spa-fecha');
-  if (fechaEl.value && fechaEl.value < todayISO()) {
-    marcarError(fechaEl, 'La fecha no puede ser anterior a hoy.');
-    valido = false;
-  }
-
-  const horaEl = document.getElementById('spa-hora');
-  if (horaEl.value && (horaEl.value < '08:00' || horaEl.value > '18:00')) {
-    marcarError(horaEl, 'El horario de atención es de 8:00 a. m. a 6:00 p. m.');
-    valido = false;
-  }
+  if (!validarCampoAgenda('spa')) valido = false;
 
   const telefono = document.getElementById('spa-telefono');
   if (telefono.value.trim() && !/^[\d+()\s-]{7,20}$/.test(telefono.value.trim())) {
@@ -2443,6 +2575,7 @@ document.getElementById('btn-reservar-spa').addEventListener('click', async () =
       estado: 'pendiente',
     };
   } catch (error) {
+    if (error.status === 409) return manejarHorarioOcupado('spa', error);
     showToast(error.message || 'No se pudo registrar la reserva.', 'error');
     return;
   }
@@ -2458,6 +2591,7 @@ document.getElementById('btn-reservar-spa').addEventListener('click', async () =
   document.getElementById('spa-form-panel').classList.add('hidden');
   document.getElementById('spa-confirmacion-panel').classList.remove('hidden');
   document.getElementById('form-spa').reset();
+  actualizarDisponibilidad('spa');
   showToast('Reserva registrada correctamente.', 'success');
 });
 
@@ -2590,6 +2724,8 @@ function validarAsesoriaForm() {
     }
   });
 
+  if (!validarCampoAgenda('asesoria')) valido = false;
+
   const telefono = document.getElementById('a-telefono');
   if (telefono.value.trim() && !/^[\d+()\s-]{7,20}$/.test(telefono.value.trim())) {
     marcarError(telefono, 'Ingresa un teléfono válido (mínimo 7 dígitos).');
@@ -2621,10 +2757,11 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
     nombre: document.getElementById('a-nombre').value.trim(),
     telefono: document.getElementById('a-telefono').value.trim(),
     correo: document.getElementById('a-correo').value.trim(),
-    negocio: document.getElementById('a-negocio').value.trim(),
     ciudad: document.getElementById('a-ciudad').value.trim(),
     motivo: document.getElementById('a-motivo').value.trim(),
     preferencia: document.getElementById('a-preferencia').value,
+    fecha_cita: document.getElementById('a-fecha').value,
+    hora_cita: document.getElementById('a-hora').value,
   };
 
   try {
@@ -2637,6 +2774,7 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
     solicitud.fecha = todayISO();
     solicitud.estado = 'pendiente';
   } catch (error) {
+    if (error.status === 409) return manejarHorarioOcupado('asesoria', error);
     showToast(error.message || 'No se pudo registrar la solicitud.', 'error');
     return;
   }
@@ -2645,6 +2783,7 @@ document.getElementById('btn-enviar-asesoria').addEventListener('click', async (
   document.getElementById('asesoria-form-panel').classList.add('hidden');
   document.getElementById('asesoria-confirmacion-panel').classList.remove('hidden');
   document.getElementById('form-asesoria').reset();
+  actualizarDisponibilidad('asesoria');
   showToast('Solicitud registrada correctamente.', 'success');
 });
 
@@ -2672,11 +2811,12 @@ function normalizarSolicitud(solicitud) {
     nombre: solicitud.nombre,
     telefono: solicitud.telefono,
     correo: solicitud.correo,
-    negocio: solicitud.negocio,
     ciudad: solicitud.ciudad,
     motivo: solicitud.motivo,
     preferencia: solicitud.preferencia,
     fecha: solicitud.fecha,
+    fechaCita: solicitud.fecha_cita || '',
+    horaCita: solicitud.hora_cita || '',
     estado: solicitud.estado,
   };
 }
@@ -2702,7 +2842,7 @@ function renderSolicitudes() {
       s.codigo.toLowerCase().includes(busqueda) ||
       s.nombre.toLowerCase().includes(busqueda) ||
       (s.ciudad || '').toLowerCase().includes(busqueda))
-    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+    .sort((a, b) => `${b.fechaCita || b.fecha}${b.horaCita}`.localeCompare(`${a.fechaCita || a.fecha}${a.horaCita}`));
 
   const tbody = document.getElementById('tabla-solicitudes-body');
   const empty = document.getElementById('solicitudes-empty');
@@ -2719,7 +2859,9 @@ function renderSolicitudes() {
         <td>${escapeHTML(s.telefono)}${s.correo ? ' · ' + escapeHTML(s.correo) : ''}</td>
         <td>${escapeHTML(s.ciudad)}</td>
         <td>${escapeHTML(s.motivo)}</td>
-        <td>${formatearFecha(s.fecha)}</td>
+        <td>${s.fechaCita
+          ? `${formatearFecha(s.fechaCita)} · ${escapeHTML(etiquetaHora(s.horaCita))}`
+          : `Sin cita (registrada ${formatearFecha(s.fecha)})`}</td>
         <td><span class="badge ${s.estado === 'atendida' ? 'badge-success' : 'badge-warning'}">${s.estado === 'atendida' ? 'Atendida' : 'Pendiente'}</span></td>
         <td class="row-actions">
           <button class="icon-btn" data-sol-toggle="${s.id}" title="${s.estado === 'atendida' ? 'Marcar pendiente' : 'Marcar atendida'}" aria-label="Cambiar estado de la solicitud"><span data-lucide="${s.estado === 'atendida' ? 'rotate-ccw' : 'check'}"></span></button>
