@@ -906,7 +906,19 @@
     <div class="form-grid">
       <div class="field field-wide"><label for="p-nombre">Nombre *</label><input type="text" id="p-nombre" required></div>
       <div class="field"><label for="p-categoria">Categoría</label><input type="text" id="p-categoria" placeholder="Ej. Hidratación, Nutrición…"></div>
-      <div class="field"><label for="p-imagen">URL de imagen</label><input type="url" id="p-imagen" placeholder="https://…"></div>
+      <div class="field field-wide">
+        <label for="p-imagen">Imagen del producto</label>
+        <div class="imagen-producto-input">
+          <input type="url" id="p-imagen" inputmode="url" placeholder="Pega el enlace de la imagen (https://…)">
+          <label class="btn btn-secondary btn-sm" for="p-imagen-archivo"><span data-lucide="upload"></span> Subir desde el dispositivo</label>
+          <input type="file" id="p-imagen-archivo" accept="image/*" hidden>
+        </div>
+        <div class="imagen-producto-preview hidden" id="p-imagen-preview">
+          <img alt="Vista previa de la imagen del producto">
+          <span class="field-hint" id="p-imagen-estado" aria-live="polite"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="p-imagen-quitar">Quitar imagen</button>
+        </div>
+      </div>
       <div class="field field-wide"><label for="p-descripcion">Descripción</label><textarea id="p-descripcion" rows="2"></textarea></div>
       <div class="field field-wide"><label for="p-ingredientes">Ingredientes</label><input type="text" id="p-ingredientes"></div>
       <div class="field field-wide"><label for="p-modo">Modo de uso</label><input type="text" id="p-modo"></div>

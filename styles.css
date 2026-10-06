@@ -537,6 +537,18 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .product-card-img { height: 130px; background: var(--sage-deep); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .product-card-img img { width: 100%; height: 100%; object-fit: cover; }
 .product-card-img [data-lucide] { width: 32px; height: 32px; color: var(--slate-light); }
+/* Respaldo visual: el ícono solo se ve si no hay imagen o si esta falla al cargar */
+.product-card-img-fallback { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--slate-light); }
+.product-card-img img ~ .product-card-img-fallback { display: none; }
+
+/* Campo de imagen del modal de producto: enlace o archivo + vista previa */
+.imagen-producto-input { display: flex; gap: var(--sp-2, 8px); align-items: center; flex-wrap: wrap; }
+.imagen-producto-input input[type="url"] { flex: 1 1 220px; min-width: 0; }
+.imagen-producto-input label.btn { cursor: pointer; white-space: nowrap; }
+.imagen-producto-preview { display: flex; align-items: center; gap: var(--sp-3, 12px); flex-wrap: wrap; margin-top: 6px; }
+.imagen-producto-preview.hidden { display: none; }
+.imagen-producto-preview img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: var(--sage-deep); }
+.imagen-producto-preview img.is-broken { display: none; }
 .product-card-body { padding: var(--sp-4); display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .product-card-cat { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--moss-dark); font-weight: 700; }
 .product-card-name { font-weight: 700; font-size: 15px; }

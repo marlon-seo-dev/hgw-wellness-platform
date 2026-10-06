@@ -1402,9 +1402,109 @@ function productosRecomendados(objetivoId) {
   return state.productos.filter(p => p.activo && (p.objetivosCompatibles || []).includes(objetivoId));
 }
 
+/* --------------------------------------------------------------------------
+   IMAGEN DE PRODUCTO
+   - normalizarUrlImagen(): convierte enlaces "de página" muy comunes
+     (Google Drive, Google Imágenes, Dropbox, Imgur) en el enlace directo a
+     la imagen, completa https:// y descarta esquemas no seguros.
+   - productImageHTML(): <img> escapada + ícono de respaldo. Si la imagen
+     falla al cargar, el listener global de 'error' la retira y queda el
+     ícono (nunca el ícono de imagen rota del navegador).
+   - Las imágenes subidas desde el dispositivo se reducen y se guardan como
+     data URL JPEG en el mismo campo `imagen`.
+   -------------------------------------------------------------------------- */
+const IMAGEN_PRODUCTO_MAX_LADO = 800;
+const IMAGEN_PRODUCTO_CALIDAD = 0.8;
+const IMAGEN_PRODUCTO_MAX_BYTES = 15 * 1024 * 1024;
+
+function escapeAttr(valor) {
+  return String(valor ?? '')
+    .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function normalizarUrlImagen(valor) {
+  let texto = String(valor || '').trim();
+  if (!texto) return '';
+  if (/^data:image\/(png|jpe?g|gif|webp|avif|svg\+xml);base64,/i.test(texto)) return texto;
+  if (texto.startsWith('//')) texto = `https:${texto}`;
+  else if (!/^[a-z][a-z\d+.-]*:/i.test(texto)) texto = `https://${texto}`;
+
+  let url;
+  try { url = new URL(texto); } catch { return ''; }
+  if (url.protocol === 'http:') url.protocol = 'https:'; // evita contenido mixto en Pages (HTTPS)
+  if (url.protocol !== 'https:') return '';
+
+  const host = url.hostname.replace(/^www\./, '');
+  // Resultado de Google Imágenes: el enlace real va en ?imgurl=
+  if (/^google\.[a-z.]+$/.test(host) && url.pathname === '/imgres' && url.searchParams.get('imgurl')) {
+    return normalizarUrlImagen(url.searchParams.get('imgurl'));
+  }
+  // Google Drive (archivo compartido como "cualquier persona con el enlace")
+  if (host === 'drive.google.com' || host === 'docs.google.com') {
+    const id = (url.pathname.match(/\/d\/([\w-]{10,})/) || [])[1] || url.searchParams.get('id');
+    if (id) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1000`;
+  }
+  // Dropbox: ?dl=0 abre una página; raw=1 entrega el archivo
+  if (host === 'dropbox.com') {
+    url.searchParams.delete('dl');
+    url.searchParams.set('raw', '1');
+    return url.href;
+  }
+  // Imgur: página de la imagen -> archivo directo
+  if (host === 'imgur.com' && /^\/[a-z\d]{5,8}$/i.test(url.pathname)) {
+    return `https://i.imgur.com${url.pathname}.jpg`;
+  }
+  return url.href;
+}
+
+// Ícono de caja en SVG propio (no depende de la librería de íconos).
+const ICONO_PRODUCTO_SVG = '<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/><path d="m7.5 5.5 9 5"/></svg>';
+
+function productImageHTML(p) {
+  const respaldo = `<span class="product-card-img-fallback">${ICONO_PRODUCTO_SVG}</span>`;
+  const src = normalizarUrlImagen(p.imagen);
+  if (!src) return respaldo;
+  // no-referrer: muchos sitios bloquean imágenes enlazadas desde otro dominio por el Referer.
+  return `<img src="${escapeAttr(src)}" alt="${escapeAttr(p.nombre)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">${respaldo}`;
+}
+
+// Fase de captura: el evento 'error' de <img> no burbujea.
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img instanceof HTMLImageElement && img.parentElement?.classList.contains('product-card-img')) img.remove();
+}, true);
+
+async function convertirArchivoAImagen(archivo) {
+  if (!archivo.type.startsWith('image/')) throw new Error('El archivo seleccionado no es una imagen.');
+  if (archivo.size > IMAGEN_PRODUCTO_MAX_BYTES) throw new Error('La imagen es demasiado pesada (máximo 15 MB).');
+
+  const objectUrl = URL.createObjectURL(archivo);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error('No se pudo leer la imagen. Prueba con un archivo JPG o PNG.'));
+      i.src = objectUrl;
+    });
+    // Se reduce para que no pese en la base de datos ni en la caché local.
+    const escala = Math.min(1, IMAGEN_PRODUCTO_MAX_LADO / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * escala));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * escala));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; // fondo blanco para PNG con transparencia
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', IMAGEN_PRODUCTO_CALIDAD);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function productMiniCardHTML(p) {
   return `<div class="product-card">
-    <div class="product-card-img">${p.imagen ? `<img src="${p.imagen}" alt="${escapeHTML(p.nombre)}">` : '<span data-lucide="package"></span>'}</div>
+    <div class="product-card-img">${productImageHTML(p)}</div>
     <div class="product-card-body">
       <span class="product-card-cat">${escapeHTML(p.categoria || 'General')}</span>
       <span class="product-card-name">${escapeHTML(p.nombre)}</span>
@@ -1969,6 +2069,7 @@ function abrirModalProducto(productoId = null) {
   const form = document.getElementById('form-producto');
   form.reset();
   document.getElementById('p-id').value = '';
+  imagenProductoSubida = '';
   renderCheckboxObjetivos();
 
   if (productoId) {
@@ -1977,7 +2078,9 @@ function abrirModalProducto(productoId = null) {
     document.getElementById('p-id').value = p.id;
     document.getElementById('p-nombre').value = p.nombre || '';
     document.getElementById('p-categoria').value = p.categoria || '';
-    document.getElementById('p-imagen').value = p.imagen || '';
+    // Una imagen subida desde el dispositivo (data URL) no se muestra como texto en el campo.
+    if ((p.imagen || '').startsWith('data:')) imagenProductoSubida = p.imagen;
+    else document.getElementById('p-imagen').value = p.imagen || '';
     document.getElementById('p-descripcion').value = p.descripcion || '';
     document.getElementById('p-ingredientes').value = p.ingredientes || '';
     document.getElementById('p-modo').value = p.modoDeUso || '';
@@ -1988,8 +2091,74 @@ function abrirModalProducto(productoId = null) {
     document.getElementById('modal-producto-title').textContent = 'Nuevo producto HGW';
   }
   clearFieldErrors(form);
+  actualizarPreviewImagenProducto();
   openModal('modal-producto');
 }
+
+/* --- Campo de imagen del modal: enlace o archivo, con vista previa --- */
+let imagenProductoSubida = ''; // data URL de una imagen subida desde el dispositivo
+let temporizadorPreviewImagen = null;
+
+function actualizarPreviewImagenProducto() {
+  const preview = document.getElementById('p-imagen-preview');
+  const img = preview.querySelector('img');
+  const estado = document.getElementById('p-imagen-estado');
+  const texto = document.getElementById('p-imagen').value.trim();
+  const src = imagenProductoSubida || normalizarUrlImagen(texto);
+
+  img.onload = img.onerror = null;
+  img.classList.remove('is-broken');
+  if (!src) {
+    img.removeAttribute('src');
+    preview.classList.toggle('hidden', !texto);
+    if (texto) {
+      img.classList.add('is-broken');
+      estado.textContent = 'Ese enlace no es válido. Usa un enlace que empiece por https://';
+    }
+    return;
+  }
+
+  preview.classList.remove('hidden');
+  estado.textContent = 'Cargando vista previa…';
+  img.onload = () => {
+    estado.textContent = imagenProductoSubida ? 'Imagen cargada desde tu dispositivo.' : 'La imagen se ve correctamente.';
+  };
+  img.onerror = () => {
+    img.classList.add('is-broken');
+    estado.textContent = 'No se pudo cargar la imagen desde ese enlace. Usa el enlace directo a la imagen (clic derecho → "Copiar dirección de imagen") o súbela desde tu dispositivo.';
+  };
+  img.referrerPolicy = 'no-referrer';
+  img.src = src;
+}
+
+document.getElementById('p-imagen').addEventListener('input', () => {
+  imagenProductoSubida = ''; // un enlace escrito reemplaza la imagen subida
+  clearTimeout(temporizadorPreviewImagen);
+  temporizadorPreviewImagen = setTimeout(actualizarPreviewImagenProducto, 400);
+});
+
+document.getElementById('p-imagen-archivo').addEventListener('change', async (e) => {
+  const archivo = e.target.files && e.target.files[0];
+  e.target.value = ''; // permite volver a elegir el mismo archivo
+  if (!archivo) return;
+  const estado = document.getElementById('p-imagen-estado');
+  document.getElementById('p-imagen-preview').classList.remove('hidden');
+  estado.textContent = 'Procesando imagen…';
+  try {
+    imagenProductoSubida = await convertirArchivoAImagen(archivo);
+    document.getElementById('p-imagen').value = '';
+    actualizarPreviewImagenProducto();
+  } catch (error) {
+    estado.textContent = error.message;
+    showToast(error.message, 'error');
+  }
+});
+
+document.getElementById('p-imagen-quitar').addEventListener('click', () => {
+  imagenProductoSubida = '';
+  document.getElementById('p-imagen').value = '';
+  actualizarPreviewImagenProducto();
+});
 document.getElementById('btn-nuevo-producto').addEventListener('click', () => abrirModalProducto());
 
 document.getElementById('btn-guardar-producto').addEventListener('click', () => {
@@ -2001,12 +2170,19 @@ document.getElementById('btn-guardar-producto').addEventListener('click', () => 
     showToast('Completa el nombre del producto.', 'error');
     return;
   }
+  const imagenEl = document.getElementById('p-imagen');
+  const imagen = imagenProductoSubida || normalizarUrlImagen(imagenEl.value);
+  if (imagenEl.value.trim() && !imagen) {
+    marcarError(imagenEl, 'El enlace de la imagen no es válido. Usa un enlace que empiece por https://');
+    showToast('Revisa el enlace de la imagen.', 'error');
+    return;
+  }
   const objetivosCompatibles = Array.from(document.querySelectorAll('#p-objetivos-grid input:checked')).map(i => i.value);
   const id = document.getElementById('p-id').value;
   const datos = {
     nombre: nombreEl.value.trim(),
     categoria: document.getElementById('p-categoria').value.trim(),
-    imagen: document.getElementById('p-imagen').value.trim(),
+    imagen,
     descripcion: document.getElementById('p-descripcion').value.trim(),
     ingredientes: document.getElementById('p-ingredientes').value.trim(),
     modoDeUso: document.getElementById('p-modo').value.trim(),
@@ -2032,7 +2208,7 @@ function renderProductos() {
   const lista = state.productos.filter(p => !busqueda || p.nombre.toLowerCase().includes(busqueda));
   document.getElementById('products-grid').innerHTML = lista.map(p => `
     <article class="product-card">
-      <div class="product-card-img">${p.imagen ? `<img src="${p.imagen}" alt="${escapeHTML(p.nombre)}">` : '<span data-lucide="package"></span>'}</div>
+      <div class="product-card-img">${productImageHTML(p)}</div>
       <div class="product-card-body">
         <span class="product-card-cat">${escapeHTML(p.categoria || 'General')}</span>
         <span class="product-card-name">${escapeHTML(p.nombre)}</span>
